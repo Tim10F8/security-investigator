@@ -1254,9 +1254,10 @@ Returns: Array of risk events (top 5 most recent) with riskEventType (unlikelyTr
 **Step 4: Get Risky Sign-ins**
 ```
 mcp_microsoft_mcp_microsoft_graph_suggest_queries("get risky sign-ins for user")
-mcp_microsoft_mcp_microsoft_graph_get("/beta/auditLogs/signIns?$filter=userPrincipalName eq '<UPN>' and (riskState eq 'atRisk' or riskState eq 'confirmedCompromised')&$select=id,createdDateTime,userPrincipalName,appDisplayName,ipAddress,location,riskState,riskLevelDuringSignIn,riskEventTypes_v2,riskDetail,status&$orderby=createdDateTime desc&$top=5")
+mcp_microsoft_mcp_microsoft_graph_get("/beta/auditLogs/signIns?$filter=userId eq '<USER_ID>' and (riskState eq 'atRisk' or riskState eq 'confirmedCompromised')&$select=id,createdDateTime,userPrincipalName,appDisplayName,ipAddress,location,riskState,riskLevelDuringSignIn,riskEventTypes_v2,riskDetail,status&$orderby=createdDateTime desc&$top=5")
 ```
 **NOTE**: Risky sign-ins are ONLY available in `/beta` endpoint, not `/v1.0`
+**CRITICAL**: Use `userId` for filtering, NOT `userPrincipalName` - filtering by UPN causes timeouts
 
 Returns: Array of sign-in events (top 5 most recent) with riskLevelDuringSignIn, riskEventTypes_v2, riskState, riskDetail, status (errorCode, failureReason)
 
