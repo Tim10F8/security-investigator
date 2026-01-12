@@ -18,25 +18,27 @@ This workspace contains a security investigation automation system. GitHub Copil
 
 ## ⚠️ CRITICAL WORKFLOW RULES - READ FIRST ⚠️
 
-**🤖 SPECIALIZED AGENT DETECTION:**
+**🤖 SPECIALIZED SKILLS DETECTION:**
 
-**BEFORE starting any investigation, detect if user request requires a specialized agent:**
+**BEFORE starting any investigation, detect if user request requires a specialized skill:**
 
 | Keywords in Request | Action Required |
 |---------------------|-----------------|
-| **"honeypot"**, "attack analysis", "threat actor" | Search workspace for `agents/honeypotInvestigation/AGENTS.md` and read it FIRST |
-| **Future agents** | Check `agents/` folder with `list_dir` to discover available specialized workflows |
+| **"honeypot"**, "attack analysis", "threat actor" | Use the **honeypot-investigation** skill at `.github/skills/honeypot-investigation/SKILL.md` |
+| **Future skills** | Check `.github/skills/` folder with `list_dir` to discover available specialized workflows |
 
 **Detection Pattern:**
 1. Parse user request for specialized keywords
-2. If match found: `file_search("**/agents/**/AGENTS.md")` to find agent instructions
-3. Read agent AGENTS.md file BEFORE proceeding with investigation
-4. Follow agent-specific workflow (inherits universal patterns from this file)
+2. If match found: Read the appropriate SKILL.md file from `.github/skills/<skill-name>/SKILL.md`
+3. Follow skill-specific workflow (inherits universal patterns from this file)
+
+**Available Skills:**
+- **honeypot-investigation**: Comprehensive honeypot security analysis with attack patterns, threat intel, vulnerabilities, and executive reports
 
 **Why this matters:**
-- Specialized agents have domain-specific KQL queries and analysis patterns
+- Specialized skills have domain-specific KQL queries and analysis patterns
 - Generic investigation workflow will miss critical context
-- Agent instructions reference universal patterns (date ranges, IP enrichment, time tracking) from this file
+- Skill instructions reference universal patterns (date ranges, IP enrichment, time tracking) from this file
 
 ---
 
