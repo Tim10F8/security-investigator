@@ -168,6 +168,15 @@ mcp_kql-search_search_kql_queries(
 2. **Use Microsoft Learn for patterns** (official best practices)
 3. **Use community examples for techniques** (real-world validation)
 
+**🔥 CRITICAL: Microsoft Learn Examples Use Defender XDR Syntax!**
+
+**⚠️ When using Microsoft Learn code samples:**
+- Microsoft Learn examples use **Defender XDR Advanced Hunting** syntax with `Timestamp`
+- If testing against **Sentinel**, you MUST convert `Timestamp` → `TimeGenerated` BEFORE testing
+- Check the platform context - Sentinel vs Defender XDR - and adjust accordingly
+
+**🔥 CRITICAL: Test queries BEFORE providing them to user - not after they ask!**
+
 **⚠️ CRITICAL: Variables vs Multiple Standalone Queries**
 
 **When user asks for MULTIPLE queries** (different analyses, different questions):
@@ -197,16 +206,33 @@ mcp_kql-search_search_kql_queries(
 | take 100
 ```
 
-### Step 6: Validate and Test
+### Step 6: Validate and Test (MANDATORY - Do This FIRST!)
 
-**Before providing to user:**
+**⚠️ TEST QUERIES BEFORE USER SEES THEM - NOT AFTER THEY ASK**
 
-1. ✅ Check column names match schema
-2. ✅ Verify time column (`TimeGenerated` vs `Timestamp`)
-3. ✅ Include comments explaining logic
-4. ✅ Add `take` or `summarize` to limit results
-5. ✅ **VALIDATE AGAINST SENTINEL MCP SERVER** (if available)
-6. ✅ Test syntax with validation tool (if schema-only validation needed)
+**🔴 CRITICAL PRE-TEST STEP: Platform Schema Conversion**
+
+**BEFORE testing against Sentinel, you MUST:**
+1. ✅ **Convert `Timestamp` → `TimeGenerated`** if using Microsoft Learn examples (they use Defender XDR syntax)
+2. ✅ **Verify all column names** match Sentinel schema (not Defender XDR schema)
+3. ✅ **Check the table exists** in Sentinel environment
+
+**Why this matters:** Microsoft Learn code samples use `Timestamp` (Defender XDR Advanced Hunting syntax), but Sentinel uses `TimeGenerated`. Testing will FAIL if you don't convert first.
+
+**Primary validation workflow (if Sentinel MCP available):**
+
+1. ✅ **CONVERT SCHEMA** (Timestamp → TimeGenerated) BEFORE testing
+2. ✅ **TEST AGAINST LIVE SENTINEL** using `mcp_sentinel-data_query_lake` with `| take 5`
+3. ✅ Verify query returns results (not empty)
+4. ✅ Fix any syntax errors or schema mismatches
+5. ✅ Re-test until query works correctly
+6. ✅ Only then provide query to user with confidence
+
+**Post-test checks:**
+
+1. ✅ Include comments explaining logic
+2. ✅ Add `take` or `summarize` to limit results (remove test limits if too restrictive)
+3. ✅ Check datetime formatting (see time formatting section below)
 
 **🔥 CRITICAL: Always Test Queries Against Live Data**
 
@@ -271,6 +297,105 @@ SigninLogs
 mcp_kql-search_validate_kql_query("<your_query>")
 ```
 **Note:** This only validates syntax and schema, not against live data. Prefer `mcp_sentinel-data_query_lake` when available.
+
+### Step 7: Format and Deliver Output
+
+**⚠️ CRITICAL: Output Format Based on Query Count**
+
+**For SINGLE query requests:**
+- ✅ **DO:** Provide query directly in chat window
+- ✅ Include brief explanation and expected results
+- ✅ Show sample output if tested against Sentinel
+- ❌ **DON'T:** Create a file for single queries
+
+**For MULTIPLE queries (3+ queries or comprehensive query collections):**
+- ✅ **DO:** Create a comprehensive markdown file
+- ✅ Save to `/queries` directory in workspace root
+- ✅ Use descriptive filename: `<topic>_<platform>_queries.md`
+- ✅ Include all queries with full documentation
+- ✅ Add examples, use cases, and tuning guidance
+
+**File naming convention:**
+```
+queries/defender_endpoint_failed_connections_queries.md
+queries/azure_ad_risky_signin_analysis_queries.md
+queries/email_threat_hunting_queries.md
+```
+
+**Markdown file structure for multiple queries:**
+```markdown
+# [Topic] - [Platform] Queries
+
+**Created:** [Date]
+**Platform:** Microsoft Sentinel / Defender XDR
+**Data Sources:** [Tables used]
+**Timeframe:** [Default lookback period]
+
+---
+
+## Overview
+
+[Brief description of query collection purpose]
+
+---
+
+## Query 1: [Descriptive Title]
+
+**Purpose:** [What this query detects/analyzes]
+
+**Thresholds:**
+- [Key threshold values]
+
+```kql
+// Query code with comments
+```
+
+**Expected Results:**
+- Column descriptions
+- What to look for
+
+**Indicators of [Attack/Issue]:**
+- [Key patterns to identify]
+
+**Example Output:**
+[Sample results if available]
+
+---
+
+## Query 2: [Next Query]
+...
+
+---
+
+## Tuning and Customization
+[How to adjust queries for environment]
+
+## Alert Rule Recommendations
+[How to convert to analytics rules]
+
+## Investigation Workflow
+[What to do with results]
+
+---
+
+```
+
+**When to create query files:**
+- User requests 3+ different queries
+- User asks for "comprehensive" or "complete" query set
+- User requests query collection for specific use case (threat hunting, investigation, monitoring)
+- Queries are related and form a cohesive analysis workflow
+
+**When to use chat output:**
+- User requests 1-2 simple queries
+- Quick ad-hoc query for immediate use
+- User testing or learning KQL syntax
+- Follow-up query to previous investigation
+
+**File location:**
+- **Directory:** `/queries` in workspace root
+- **Git:** Already excluded in `.gitignore` (may contain environment-specific info)
+- **Purpose:** Reusable query collections for common scenarios
 
 ---
 
@@ -713,6 +838,63 @@ EmailEvents
 2. Check schema with `mcp_kql-search_get_table_schema`
 3. Look at example queries in schema output
 4. If query fails with "column not found", try alternate name
+
+---
+
+### Time Range Formatting
+
+**⚠️ CRITICAL: Use `ago()` function, NOT datetime literals**
+
+**✅ CORRECT - Use ago() function:**
+```kql
+SigninLogs
+| where TimeGenerated > ago(7d)   // Last 7 days
+| where TimeGenerated > ago(30d)  // Last 30 days
+| where TimeGenerated > ago(1h)   // Last 1 hour
+```
+
+**❌ WRONG - Hardcoded datetime strings (will fail or give wrong results):**
+```kql
+SigninLogs
+| where TimeGenerated > "2026-01-06"  // ERROR: String comparison
+| where TimeGenerated > 2026-01-06    // ERROR: Invalid syntax
+```
+
+**For specific date ranges, use `between()` with `datetime()` function:**
+```kql
+let start = datetime(2026-01-01);
+let end = datetime(2026-01-13);
+SigninLogs
+| where TimeGenerated between (start .. end)
+```
+
+**Common time range patterns:**
+```kql
+// Relative time ranges (PREFERRED)
+| where TimeGenerated > ago(7d)      // Last 7 days
+| where TimeGenerated > ago(24h)     // Last 24 hours
+| where TimeGenerated > ago(90d)     // Last 90 days
+
+// Specific date ranges
+let startDate = datetime(2026-01-01);
+let endDate = datetime(2026-01-31);
+| where TimeGenerated between (startDate .. endDate)
+
+// Time window (last X to Y ago)
+| where TimeGenerated between (ago(14d) .. ago(7d))  // Between 14 and 7 days ago
+```
+
+**Time units for ago():**
+- `d` = days
+- `h` = hours
+- `m` = minutes
+- `s` = seconds
+
+**Why ago() is preferred:**
+- Always relative to query execution time
+- No timezone confusion
+- Works across all environments
+- No need to calculate dates manually
 
 ---
 
