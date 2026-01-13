@@ -10,9 +10,8 @@ This workspace contains a security investigation automation system. GitHub Copil
 2. **[Available Skills](#available-skills)** - Specialized investigation workflows
 3. **[Universal Patterns](#universal-patterns)** - Date ranges, time tracking, token management
 4. **[Follow-Up Analysis](#-critical-follow-up-analysis-workflow-mandatory)** - Working with existing data
-5. **[CA Policy Analysis](#appendix-conditional-access-policy-investigation-workflow)** - Conditional Access troubleshooting
-6. **[Ad-Hoc Queries](#appendix-ad-hoc-query-examples)** - Quick reference patterns
-7. **[Troubleshooting](#troubleshooting-guide)** - Common issues and solutions
+5. **[Ad-Hoc Queries](#appendix-ad-hoc-query-examples)** - Quick reference patterns
+6. **[Troubleshooting](#troubleshooting-guide)** - Common issues and solutions
 
 ---
 
@@ -28,6 +27,7 @@ This workspace contains a security investigation automation system. GitHub Copil
 | **"honeypot"**, "attack analysis", "threat actor" | Use the **honeypot-investigation** skill at `.github/skills/honeypot-investigation/SKILL.md` |
 | **"write KQL"**, "create KQL query", "help with KQL", "query [table]", "KQL for [scenario]" | Use the **kql-query-authoring** skill at `.github/skills/kql-query-authoring/SKILL.md` |
 | **"trace authentication"**, "trace back to interactive MFA", "SessionId analysis", "token reuse", "geographic anomaly", "impossible travel" | Use the **authentication-tracing** skill at `.github/skills/authentication-tracing/SKILL.md` |
+| **"Conditional Access"**, "CA policy", "device compliance", "policy bypass", "53000", "50074", "530032" | Use the **ca-policy-investigation** skill at `.github/skills/ca-policy-investigation/SKILL.md` |
 | **Future skills** | Check `.github/skills/` folder with `list_dir` to discover available specialized workflows |
 
 **Detection Pattern:**
@@ -45,6 +45,7 @@ This workspace contains a security investigation automation system. GitHub Copil
 | **honeypot-investigation** | Honeypot security analysis: attack patterns, threat intel, vulnerabilities, executive reports | "honeypot", "attack analysis", "threat actor" |
 | **kql-query-authoring** | KQL query creation using schema validation, community examples, Microsoft Learn | "write KQL", "create KQL query", "help with KQL", "query [table]" |
 | **authentication-tracing** | Azure AD authentication chain forensics: SessionId analysis, token reuse vs interactive MFA, geographic anomaly investigation, risk assessment | "trace authentication", "trace back to interactive MFA", "SessionId analysis", "token reuse", "geographic anomaly" |
+| **ca-policy-investigation** | Conditional Access policy forensics: sign-in failure correlation, policy state changes, security bypass detection, privilege abuse analysis | "Conditional Access", "CA policy", "device compliance", "policy bypass", "53000", "50074" |
 
 **Skill files location:** `.github/skills/<skill-name>/SKILL.md`
 
@@ -110,6 +111,63 @@ The investigation system integrates with these MCP servers (which Copilot has ac
 - **mcp_microsoft_mcp_microsoft_graph_get**: Execute Graph API calls
 - **mcp_microsoft_mcp_microsoft_graph_list_properties**: Explore entity schemas
 
+### Custom Sentinel Tables
+
+#### SigninLogs_Anomalies_KQL_CL
+**Purpose:** Pre-computed sign-in anomaly detection table populated by hourly KQL job. Tracks new IPs and device combinations against 90-day baseline.
+
+**Key Features:**
+- **Anomaly Types:** `NewInteractiveIP`, `NewInteractiveDeviceCombo`, `NewNonInteractiveIP`, `NewNonInteractiveDeviceCombo`
+- **Detection Model:** Compares last 1 hour activity against 90-day baseline (excluding most recent hour)
+- **IPv6 Filtering:** Excludes transient IPv6 addresses to reduce false positives
+- **Geographic Novelty:** Tracks country/city/state changes with novelty flags
+- **Severity Scoring:** Based on artifact hit frequency and geographic novelty
+
+**Key Columns:**
+- `DetectedDateTime`: When anomaly was detected
+- `UserPrincipalName`: Affected user
+- `AnomalyType`: Category of anomaly
+- `Value`: Anomalous artifact (IP address or OS|BrowserFamily combo)
+- `Severity`: High/Medium/Low/Informational (based on hit count + geo novelty)
+- `ArtifactHits`: Count of occurrences in 1-hour window
+- `CountryNovelty`, `CityNovelty`, `StateNovelty`: Geographic novelty flags
+- `BaselineSize`: Historical artifact baseline count
+- `FirstSeenRecent`: First appearance timestamp
+- `Baseline*List`: Arrays of historical IPs, countries, cities, devices, browsers
+
+**When to Use:**
+- Rapid anomaly triage during user investigations
+- Identifying suspicious IP origins or device changes
+- Geographic impossible travel detection
+- Token theft indicators (non-interactive anomalies with geo changes)
+- Baseline comparison for new authentication patterns
+
+**Example Query:**
+```kql
+// Get high-severity anomalies for user
+Signinlogs_Anomalies_KQL_CL
+| where TimeGenerated > ago(14d)
+| where UserPrincipalName =~ '<UPN>'
+| extend Severity = case(
+    BaselineSize < 3 and AnomalyType startswith "NewNonInteractive", "Informational",
+    CountryNovelty and CityNovelty and ArtifactHits >= 20, "High",
+    ArtifactHits >= 10 or CountryNovelty or CityNovelty or StateNovelty, "Medium",
+    ArtifactHits >= 5, "Low",
+    "Informational")
+| where Severity in ("High", "Medium")
+| project DetectedDateTime, AnomalyType, Value, Severity, Country, City, 
+    ArtifactHits, CountryNovelty, CityNovelty, OS, BrowserFamily
+| order by DetectedDateTime desc
+```
+
+**Severity Thresholds (Hourly Detection):**
+- **High:** ≥20 hits/hour + geographic novelty (very aggressive use)
+- **Medium:** ≥10 hits/hour OR any geographic novelty
+- **Low:** ≥5 hits/hour without geographic novelty
+- **Informational:** 1-4 hits/hour
+
+**Full Documentation:** See [docs/Signinlogs_Anomalies_KQL_CL.md](../docs/Signinlogs_Anomalies_KQL_CL.md) for complete schema and triage guidance.
+
 ## Configuration
 
 Configuration is stored in `config.json`:
@@ -121,169 +179,6 @@ Configuration is stored in `config.json`:
   "output_dir": "reports"
 }
 ```
-
----
-
-## APPENDIX: Conditional Access Policy Investigation Workflow
-
-### Critical Investigation Rules
-
-When investigating sign-in failures (error codes 53000, 50074) with CA policy correlation:
-
-**⚠️ MANDATORY STEPS - DO NOT SKIP:**
-
-1. **Query ALL CA policy changes in chronological order** (±2 days from failure time)
-2. **Parse policy state transitions** from the JSON (enabled → disabled → report-only)
-3. **Compare failure timeline with policy change timeline**
-4. **Verify logical consistency**: Ask "does this make sense?"
-
-### Common Error Codes
-
-| Error Code | Description | Typical Cause |
-|------------|-------------|---------------|
-| **53000** | Device not compliant | Device not enrolled in Intune or failing compliance checks |
-| **50074** | Strong authentication required | MFA not satisfied |
-| **50074** | User must enroll in MFA | MFA not configured for user |
-| **530032** | Blocked by CA policy | Generic CA policy block |
-| **65001** | User consent required | Application consent needed |
-
-### CA Policy State Meanings
-
-| State | What It Means | Security Impact |
-|-------|---------------|----------------|
-| **enabled** | Policy actively enforcing | Blocks non-compliant access (intended behavior) |
-| **disabled** | Policy not enforcing | **Security control bypassed** - all access allowed |
-| **enabledForReportingButNotEnforced** | Report-only mode | Logs violations but **doesn't block** - defeats purpose |
-
-### Investigation Workflow Pattern
-
-**Step 1: Identify Sign-In Failures**
-```kql
-// Get failures with CA context
-union isfuzzy=true SigninLogs, AADNonInteractiveUserSignInLogs
-| where TimeGenerated between (datetime(<START>) .. datetime(<END>))
-| where UserPrincipalName =~ '<UPN>'
-| where ResultType != '0'
-| where AppDisplayName has '<APPLICATION>'  // e.g., "Visual Studio Code"
-| project TimeGenerated, IPAddress, Location, ResultType, ResultDescription, 
-    ConditionalAccessStatus, UserAgent
-| order by TimeGenerated asc
-```
-
-**Step 2: Query ALL CA Policy Changes in Timeframe**
-```kql
-let failure_time = datetime(<FIRST_FAILURE_TIME>);
-let start = failure_time - 2d;
-let end = failure_time + 2d;
-AuditLogs
-| where TimeGenerated between (start .. end)
-| where OperationName has_any ("Conditional Access", "policy")
-| where Identity =~ '<UPN>' or tostring(InitiatedBy) has '<UPN>'
-| extend InitiatorUPN = tostring(parse_json(InitiatedBy).user.userPrincipalName)
-| extend InitiatorIPAddress = tostring(parse_json(InitiatedBy).user.ipAddress)
-| extend TargetName = tostring(parse_json(TargetResources)[0].displayName)
-| project TimeGenerated, OperationName, Result, InitiatorUPN, InitiatorIPAddress, 
-    TargetName, CorrelationId
-| order by TimeGenerated asc  // CRITICAL: Chronological order
-```
-
-**Step 3: Parse Policy State Changes**
-```kql
-// For each CorrelationId from Step 2, get detailed changes
-AuditLogs
-| where CorrelationId == "<CORRELATION_ID>"
-| extend ModifiedProperties = parse_json(TargetResources)[0].modifiedProperties
-| mv-expand ModifiedProperties
-| extend PropertyName = tostring(ModifiedProperties.displayName)
-| extend OldValue = tostring(ModifiedProperties.oldValue)
-| extend NewValue = tostring(ModifiedProperties.newValue)
-| project TimeGenerated, PropertyName, OldValue, NewValue
-```
-
-**Step 4: Extract Policy State from JSON**
-- Parse `OldValue` and `NewValue` JSON for `"state":"<value>"`
-- Build timeline: `enabled` → `disabled` → `enabledForReportingButNotEnforced`
-
-**Step 5: Security Assessment**
-
-Compare timelines and assess intent:
-
-| Pattern | Interpretation | Risk Level |
-|---------|----------------|------------|
-| **Failures → Policy Disabled** | User bypassed security control to unblock self | **HIGH** - Privilege abuse |
-| **Failures → Policy Changed to Report-Only** | User weakened security control | **MEDIUM-HIGH** - Partial bypass |
-| **Policy Disabled → Failures Continue** | Cached tokens (5-15 min propagation delay) | **INFO** - Expected behavior |
-| **Policy Changed → No More Failures** | Policy change resolved issue | **Context-dependent** - May be legitimate troubleshooting |
-
-### Real-World Example Analysis
-
-**Scenario:** User blocked by device compliance policy, then modifies policy
-
-**Timeline:**
-- 19:05 - User blocked (error 53000: device not compliant)
-- 19:09 - User changes policy: `enabled` → `disabled`
-- 19:09 - User changes policy again: `disabled` → `enabledForReportingButNotEnforced`
-- 19:12 - User still blocked (cached token)
-- 19:14 - User access succeeds (policy propagated)
-
-**Analysis:**
-1. ✅ Policy was correctly blocking non-compliant device
-2. 🚨 User disabled security control to bypass block
-3. ⚠️ User partially reversed by enabling report-only (shows some awareness)
-4. ❌ Report-only mode still defeats the purpose (doesn't block)
-
-**Assessment:**
-- **Risk Level:** MEDIUM-HIGH
-- **Finding:** Self-service security bypass using privileged role
-- **Root Cause:** User's device is non-compliant (not enrolled/failing compliance)
-- **Recommendation:** 
-  - Investigate why device is non-compliant
-  - Implement approval workflow for CA policy changes
-  - Alert on policy state changes (enabled → disabled/report-only)
-  - Review if user should have permission to modify CA policies
-
-### Critical Mistakes to Avoid
-
-❌ **DON'T:**
-- Query only ONE policy change event (you'll miss the sequence)
-- Read policy changes in reverse chronological order (confuses cause/effect)
-- Assume policy was already disabled without checking the starting state
-- Skip verifying "does this make logical sense?" (disabled policies can't block users)
-
-✅ **DO:**
-- Query ALL policy changes in the timeframe
-- Order chronologically (oldest first) to see the sequence
-- Parse the full JSON to extract policy state transitions
-- Cross-check: If user was blocked, policy must have been enabled at that time
-- Ask: "Why would user disable this policy?" (Usually to bypass a legitimate block)
-
-### Security Recommendations
-
-**When CA Policy Changes Are Detected:**
-
-1. **Determine Legitimacy:**
-   - Was the policy change authorized?
-   - Was there a valid business reason?
-   - Did the user have approval to make this change?
-
-2. **Assess Impact:**
-   - How many users affected by policy change?
-   - What applications/resources are now unprotected?
-   - How long was the policy disabled/weakened?
-
-3. **Remediation Actions:**
-   - Restore policy to `enabled` state if change was unauthorized
-   - Investigate root cause (why was user blocked?)
-   - Fix underlying issue (device compliance, MFA enrollment, etc.)
-   - Review who has permission to modify CA policies
-   - Implement approval workflows for policy changes
-   - Alert on future CA policy modifications
-
-4. **Long-Term Improvements:**
-   - Use PIM for Security Administrator role (require approval)
-   - Implement CA policy change alerts
-   - Require multi-admin approval for policy state changes
-   - Document approved procedures for policy troubleshooting
 
 ---
 
