@@ -85,6 +85,10 @@ Without these MCP servers, this skill cannot access schema information or offici
    - Expected results
    - Any limitations or notes
 
+7. **ALWAYS read the complete ## Query Authoring Workflow**
+   - Read all the steps of the workflow
+   - Understand the process and actions you need to take
+
 ---
 
 ## Query Authoring Workflow
