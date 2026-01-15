@@ -27,9 +27,6 @@ archive/
 # Authoring (blog drafts and style guides)
 authoring/
 
-# Query files (KQL query collections - may contain environment-specific info)
-queries/
-
 # IDE
 .vscode/
 .idea/
