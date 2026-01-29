@@ -31,6 +31,8 @@ This workspace contains a security investigation automation system. GitHub Copil
 | **"write KQL"**, "create KQL query", "help with KQL", "query [table]", "KQL for [scenario]" | Use the **kql-query-authoring** skill at `.github/skills/kql-query-authoring/SKILL.md` |
 | **"trace authentication"**, "trace back to interactive MFA", "SessionId analysis", "token reuse", "geographic anomaly", "impossible travel" | Use the **authentication-tracing** skill at `.github/skills/authentication-tracing/SKILL.md` |
 | **"Conditional Access"**, "CA policy", "device compliance", "policy bypass", "53000", "50074", "530032" | Use the **ca-policy-investigation** skill at `.github/skills/ca-policy-investigation/SKILL.md` |
+| **"heatmap"**, "show heatmap", "visualize patterns", "activity grid", "time-based visualization" | Use the **heatmap-visualization** skill at `.github/skills/heatmap-visualization/SKILL.md` |
+| **"geomap"**, "world map", "geographic", "attack map", "show on map", "attack origins" | Use the **geomap-visualization** skill at `.github/skills/geomap-visualization/SKILL.md` |
 | **Future skills** | Check `.github/skills/` folder with `list_dir` to discover available specialized workflows |
 
 **Detection Pattern:**
@@ -95,6 +97,8 @@ When executing ANY Sentinel query (via `mcp_stefanpe-sent2_query_lake`, `mcp_mic
 | **kql-query-authoring** | KQL query creation using schema validation, community examples, Microsoft Learn | "write KQL", "create KQL query", "help with KQL", "query [table]" |
 | **authentication-tracing** | Azure AD authentication chain forensics: SessionId analysis, token reuse vs interactive MFA, geographic anomaly investigation, risk assessment | "trace authentication", "trace back to interactive MFA", "SessionId analysis", "token reuse", "geographic anomaly" |
 | **ca-policy-investigation** | Conditional Access policy forensics: sign-in failure correlation, policy state changes, security bypass detection, privilege abuse analysis | "Conditional Access", "CA policy", "device compliance", "policy bypass", "53000", "50074" |
+| **heatmap-visualization** | Interactive heatmap visualization for Sentinel data: attack patterns by time, activity grids, IP vs hour matrices, threat intel drill-down panels | "heatmap", "show heatmap", "visualize patterns", "activity grid" |
+| **geomap-visualization** | Interactive world map visualization for Sentinel data: attack origin maps, geographic threat distribution, IP geolocation with enrichment drill-down | "geomap", "world map", "geographic", "attack map", "attack origins" |
 
 **Skill files location:** `.github/skills/<skill-name>/SKILL.md`
 
@@ -192,6 +196,69 @@ Azure AD and Microsoft 365 API integration:
 - **mcp_microsoft_mcp_microsoft_graph_list_properties**: Explore entity schemas when RAG examples are insufficient
 - **Critical Workflow**: ALWAYS call `suggest_queries` before `get` - never construct URLs from memory. Resolve template variables before making final API calls
 - **Documentation**: Built-in Graph MCP integration
+
+### Sentinel Heatmap MCP (Custom Visualization)
+Interactive heatmap visualization for Sentinel security data, rendered inline in VS Code chat:
+- **mcp_sentinel-heat_show-signin-heatmap**: Display aggregated data as an interactive heatmap with optional threat intel drill-down
+- **Location**: `mcp-apps/sentinel-heatmap-server/` (local TypeScript/React MCP App)
+
+**Tool Parameters:**
+| Parameter | Required | Description |
+|-----------|----------|-------------|
+| `data` | ✅ | Array of `{row, column, value}` objects from KQL query |
+| `title` | ❌ | Heatmap title (default: "Sign-In Heatmap") |
+| `rowLabel` | ❌ | Label for rows (e.g., "IP Address", "Application") |
+| `colLabel` | ❌ | Label for columns (e.g., "Hour", "Day") |
+| `valueLabel` | ❌ | Label for cell values (e.g., "Failed Attempts", "Sign-ins") |
+| `colorScale` | ❌ | Color scheme: `green-red` (activity), `blue-red` (threats), `blue-yellow` (neutral) |
+| `enrichment` | ❌ | Array of IP enrichment objects for click-to-expand threat intel panel |
+
+**Enrichment Schema (for drill-down panels):**
+```json
+{
+  "ip": "80.94.95.83",
+  "city": "Timișoara",
+  "country": "RO",
+  "org": "AS204428 SS-Net",
+  "is_vpn": false,
+  "abuse_confidence_score": 100,
+  "total_reports": 975,
+  "last_reported": "2026-01-29",
+  "threat_categories": ["RDP Brute-Force", "Hacking", "Port Scan"]
+}
+```
+
+**When to Use:**
+- Visualizing attack patterns by IP and time (honeypot investigations)
+- Sign-in activity heatmaps by application and hour
+- Failed authentication attempts by location and day
+- Any aggregated Sentinel data with row/column/value structure
+
+**KQL Query Pattern for Heatmap Data:**
+```kql
+<Table>
+| where TimeGenerated between (start .. end)
+| summarize value = count() by row = <dimension1>, column = format_datetime(bin(TimeGenerated, 1h), "HH:mm")
+| project row, column, value
+| order by column asc
+```
+
+**Example - Attack Heatmap by IP and Hour:**
+```kql
+SecurityEvent
+| where TimeGenerated between (datetime(2026-01-26) .. datetime(2026-01-27))
+| where EventID == 4625
+| summarize value = count() by row = IpAddress, column = format_datetime(bin(TimeGenerated, 1h), "HH:mm")
+| project row, column, value
+| order by column asc, value desc
+```
+
+**Features:**
+- 📊 Dark theme matching VS Code (Microsoft brand colors)
+- 🎨 Three color scales for different use cases
+- 🔍 Hover tooltips showing full details
+- 🖱️ Click-to-expand threat intel panels (when enrichment data provided)
+- 📈 Auto-calculated statistics (total, max, min, unique rows/columns)
 
 ### Custom Sentinel Tables
 
