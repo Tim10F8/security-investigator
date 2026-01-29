@@ -19,6 +19,7 @@ This agent performs comprehensive security analysis on honeypot servers to asses
 4. **[KQL Query Library](#kql-query-library)** - Validated query patterns
 5. **[Report Template](#report-template)** - Executive markdown structure
 6. **[Error Handling](#error-handling)** - Troubleshooting guide
+7. **[Visualization Options](#visualization-options)** - Heatmap and Geomap skills
 
 ---
 
@@ -533,4 +534,31 @@ This skill follows all patterns from the main `copilot-instructions.md`:
 
 ---
 
-*Last Updated: January 12, 2026*
+## Visualization Options
+
+After completing the investigation, offer to visualize the attack data using the dedicated visualization skills:
+
+### Heatmap Visualization
+Use the **heatmap-visualization** skill (`.github/skills/heatmap-visualization/SKILL.md`) to show attack patterns over time with threat intel drill-down.
+
+**When to offer:**
+- ✅ After completing honeypot investigation phases
+- ✅ When user asks "show me the attack patterns" or "visualize the attacks"
+- ✅ For comparing attack volumes across time periods
+- ❌ Skip if investigation found minimal activity (<5 unique IPs)
+
+### Geomap Visualization
+Use the **geomap-visualization** skill (`.github/skills/geomap-visualization/SKILL.md`) to show attack origins on a world map.
+
+**When to offer:**
+- ✅ After completing honeypot investigation phases
+- ✅ When user asks "where are the attacks coming from?" or "show on a map"
+- ✅ For geographic threat distribution analysis
+- ❌ Skip if all IPs are from the same region
+
+**Note:** W3CIISLog includes native `RemoteIPLatitude` and `RemoteIPLongitude` fields - use these directly for geomap visualization without additional enrichment.
+
+---
+
+*Last Updated: January 29, 2026*
+

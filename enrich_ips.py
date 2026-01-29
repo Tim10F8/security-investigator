@@ -43,6 +43,8 @@ def enrich_single_ip(ip: str, config: dict) -> dict:
         'org': 'Unknown',
         'asn': 'Unknown',
         'timezone': 'Unknown',
+        'latitude': None,
+        'longitude': None,
         'is_vpn': False,
         'is_proxy': False,
         'is_tor': False,
@@ -71,6 +73,16 @@ def enrich_single_ip(ip: str, config: dict) -> dict:
             result['country'] = ipinfo_data.get('country', 'Unknown')
             result['org'] = ipinfo_data.get('org', 'Unknown')
             result['timezone'] = ipinfo_data.get('timezone', 'Unknown')
+            
+            # Extract lat/lon from 'loc' field (format: "lat,lon")
+            loc = ipinfo_data.get('loc', '')
+            if loc and ',' in loc:
+                try:
+                    lat, lon = loc.split(',')
+                    result['latitude'] = float(lat)
+                    result['longitude'] = float(lon)
+                except ValueError:
+                    pass  # Keep defaults if parsing fails
             
             privacy = ipinfo_data.get('privacy', {})
             result['is_vpn'] = privacy.get('vpn', False)
