@@ -530,6 +530,23 @@ mcp_sentinel-geom_show-attack-map({
 
 When users select IPs from the geomap and click **"🔍 Investigate in Chat"**, run these queries to provide comprehensive threat analysis. Execute queries in parallel where possible.
 
+### 🔧 Tool Selection: Data Lake vs Advanced Hunting
+
+**CRITICAL:** Some tables exist only in Defender XDR Advanced Hunting, not in Sentinel Data Lake.
+
+| Table | Tool to Use | Timestamp Column |
+|-------|-------------|------------------|
+| **SigninLogs** | `mcp_sentinel-data_query_lake` | `TimeGenerated` |
+| **SecurityAlert** | `mcp_sentinel-data_query_lake` | `TimeGenerated` |
+| **ThreatIntelIndicators** | `mcp_sentinel-data_query_lake` | `TimeGenerated` |
+| **W3CIISLog** | `mcp_sentinel-data_query_lake` | `TimeGenerated` |
+| **DeviceNetworkEvents** | `RunAdvancedHuntingQuery` ⚠️ | `Timestamp` |
+| **SecurityEvent** | `RunAdvancedHuntingQuery` ⚠️ | `Timestamp` |
+| **DeviceProcessEvents** | `RunAdvancedHuntingQuery` ⚠️ | `Timestamp` |
+| **DeviceFileEvents** | `RunAdvancedHuntingQuery` ⚠️ | `Timestamp` |
+
+**Note:** If a Data Lake query fails with "Failed to resolve table", retry with `RunAdvancedHuntingQuery`.
+
 ### Multi-IP Filter Pattern
 
 All queries use this dynamic IP filter:
@@ -541,21 +558,23 @@ Replace with the actual IPs selected from the geomap.
 
 ---
 
-### Query 1: DeviceNetworkEvents (Network Activity)
+### Query 1: DeviceNetworkEvents (Network Activity) — Use Advanced Hunting
 
 **Purpose:** Show all network connections from selected IPs to any device in the environment.
+
+**Tool:** `RunAdvancedHuntingQuery` (NOT Data Lake)
 
 ```kql
 let target_ips = dynamic(["<IP1>", "<IP2>", "<IP3>"]);
 let start = datetime(<StartDate>);
 let end = datetime(<EndDate>);
 DeviceNetworkEvents
-| where TimeGenerated between (start .. end)
+| where Timestamp between (start .. end)
 | where RemoteIP in (target_ips)
 | summarize 
     ConnectionCount = count(),
-    FirstSeen = min(TimeGenerated),
-    LastSeen = max(TimeGenerated),
+    FirstSeen = min(Timestamp),
+    LastSeen = max(Timestamp),
     TargetDevices = make_set(DeviceName, 10),
     TargetPorts = make_set(LocalPort, 20),
     Actions = make_set(ActionType, 5)
@@ -574,22 +593,24 @@ DeviceNetworkEvents
 
 ---
 
-### Query 2: SecurityEvent (Windows Authentication)
+### Query 2: SecurityEvent (Windows Authentication) — Use Advanced Hunting
 
 **Purpose:** Show Windows authentication attempts from selected IPs.
+
+**Tool:** `RunAdvancedHuntingQuery` (NOT Data Lake) — SecurityEvent may not exist in Data Lake
 
 ```kql
 let target_ips = dynamic(["<IP1>", "<IP2>", "<IP3>"]);
 let start = datetime(<StartDate>);
 let end = datetime(<EndDate>);
 SecurityEvent
-| where TimeGenerated between (start .. end)
+| where Timestamp between (start .. end)
 | where IpAddress in (target_ips)
 | where EventID in (4624, 4625, 4648, 4771, 4776)
 | summarize 
     EventCount = count(),
-    FirstSeen = min(TimeGenerated),
-    LastSeen = max(TimeGenerated),
+    FirstSeen = min(Timestamp),
+    LastSeen = max(Timestamp),
     TargetComputers = make_set(Computer, 10),
     TargetAccounts = make_set(Account, 20),
     LogonTypes = make_set(LogonType, 5)
@@ -780,9 +801,11 @@ SecurityAlert
 
 ---
 
-### Query 7: DeviceProcessEvents (Process Execution Post-Compromise)
+### Query 7: DeviceProcessEvents (Process Execution Post-Compromise) — Use Advanced Hunting
 
 **Purpose:** If attacker IPs had successful connections, check for suspicious process execution.
+
+**Tool:** `RunAdvancedHuntingQuery` (NOT Data Lake)
 
 ```kql
 let target_ips = dynamic(["<IP1>", "<IP2>", "<IP3>"]);
@@ -790,26 +813,28 @@ let start = datetime(<StartDate>);
 let end = datetime(<EndDate>);
 // First, find devices that had connections from target IPs
 let compromised_devices = DeviceNetworkEvents
-| where TimeGenerated between (start .. end)
+| where Timestamp between (start .. end)
 | where RemoteIP in (target_ips)
 | where ActionType in ("ConnectionSuccess", "InboundConnectionAccepted")
 | distinct DeviceName;
 // Then check for suspicious processes on those devices
 DeviceProcessEvents
-| where TimeGenerated between (start .. end)
+| where Timestamp between (start .. end)
 | where DeviceName in (compromised_devices)
 | where FileName in~ ("powershell.exe", "cmd.exe", "wscript.exe", "cscript.exe", "mshta.exe", "certutil.exe", "bitsadmin.exe", "regsvr32.exe", "rundll32.exe")
     or ProcessCommandLine has_any ("Invoke-", "IEX", "DownloadString", "WebClient", "-enc", "-encoded", "bypass", "hidden")
-| project TimeGenerated, DeviceName, FileName, ProcessCommandLine, AccountName, InitiatingProcessFileName
-| order by TimeGenerated desc
+| project Timestamp, DeviceName, FileName, ProcessCommandLine, AccountName, InitiatingProcessFileName
+| order by Timestamp desc
 | take 50
 ```
 
 ---
 
-### Query 8: DeviceFileEvents (Malware Drops)
+### Query 8: DeviceFileEvents (Malware Drops) — Use Advanced Hunting
 
 **Purpose:** Check for file creation/modification on devices contacted by attacker IPs.
+
+**Tool:** `RunAdvancedHuntingQuery` (NOT Data Lake)
 
 ```kql
 let target_ips = dynamic(["<IP1>", "<IP2>", "<IP3>"]);
@@ -817,20 +842,20 @@ let start = datetime(<StartDate>);
 let end = datetime(<EndDate>);
 // Find devices that had connections from target IPs
 let compromised_devices = DeviceNetworkEvents
-| where TimeGenerated between (start .. end)
+| where Timestamp between (start .. end)
 | where RemoteIP in (target_ips)
 | where ActionType in ("ConnectionSuccess", "InboundConnectionAccepted")
 | distinct DeviceName;
 // Check for suspicious file activity
 DeviceFileEvents
-| where TimeGenerated between (start .. end)
+| where Timestamp between (start .. end)
 | where DeviceName in (compromised_devices)
 | where ActionType in ("FileCreated", "FileModified")
 | where FileName endswith_cs ".exe" or FileName endswith_cs ".dll" or FileName endswith_cs ".ps1" 
     or FileName endswith_cs ".bat" or FileName endswith_cs ".vbs" or FileName endswith_cs ".js"
 | where FolderPath has_any ("\\Temp\\", "\\AppData\\", "\\Downloads\\", "\\ProgramData\\", "\\Users\\Public\\")
-| project TimeGenerated, DeviceName, FileName, FolderPath, ActionType, InitiatingProcessFileName, SHA256
-| order by TimeGenerated desc
+| project Timestamp, DeviceName, FileName, FolderPath, ActionType, InitiatingProcessFileName, SHA256
+| order by Timestamp desc
 | take 50
 ```
 
@@ -840,17 +865,19 @@ DeviceFileEvents
 
 When user selects IPs and clicks "Investigate in Chat":
 
-**Phase 1 (Parallel):**
-- Query 1: DeviceNetworkEvents
-- Query 2: SecurityEvent
-- Query 3: W3CIISLog
-- Query 4: SigninLogs
-- Query 5: ThreatIntelIndicators
-- Query 6: SecurityAlert
+**Phase 1 (Parallel) — Data Lake queries:**
+- Query 3: W3CIISLog → `mcp_sentinel-data_query_lake`
+- Query 4: SigninLogs → `mcp_sentinel-data_query_lake`
+- Query 5: ThreatIntelIndicators → `mcp_sentinel-data_query_lake`
+- Query 6: SecurityAlert → `mcp_sentinel-data_query_lake`
 
-**Phase 2 (If connections found):**
-- Query 7: DeviceProcessEvents (post-compromise activity)
-- Query 8: DeviceFileEvents (malware indicators)
+**Phase 1 (Parallel) — Advanced Hunting queries:**
+- Query 1: DeviceNetworkEvents → `RunAdvancedHuntingQuery`
+- Query 2: SecurityEvent → `RunAdvancedHuntingQuery`
+
+**Phase 2 (If connections found) — Advanced Hunting:**
+- Query 7: DeviceProcessEvents → `RunAdvancedHuntingQuery`
+- Query 8: DeviceFileEvents → `RunAdvancedHuntingQuery`
 
 **Response Format:**
 
@@ -919,4 +946,4 @@ For each selected IP:
 
 ---
 
-*Last Updated: January 29, 2026*
+*Last Updated: February 1, 2026*
