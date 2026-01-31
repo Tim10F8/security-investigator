@@ -140,7 +140,7 @@ This system **requires five MCP servers** to be installed and configured in VS C
 
 ```powershell
 # Create virtual environment
-python -m venv .ven
+python -m venv .venv
 
 # Activate virtual environment
 .\.venv\Scripts\Activate.ps1  # PowerShell
