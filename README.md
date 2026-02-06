@@ -1,13 +1,26 @@
 # 🔒 Security Investigation Automation System
 
-**Comprehensive, automated security investigations with professional HTML reports - powered by Microsoft Sentinel, Graph API, and threat intelligence**
+**Comprehensive, automated security investigations powered by Microsoft Sentinel, Defender XDR, Graph API, and threat intelligence - with 11 specialized Agent Skills**
 
-A Proof of Concept investigation automation system that leverages **GitHub Copilot**, **Microsoft Sentinel MCP Server**, and **Microsoft MCP Server for Enterprice (Graph API)** to deliver comprehensive user security assessments in minutes. Designed for SOC teams requiring repeatable, deterministic investigations with actionable risk assessments.
+An investigation automation framework that combines **GitHub Copilot**, **VS Code Agent Skills**, and **Model Context Protocol (MCP) servers** to enable natural language security investigations. Ask questions like *"Investigate this user for the last 7 days"* or *"Is this IP malicious?"* and get comprehensive analysis with KQL queries, threat intelligence correlation, and professional reports.
 
-### Investigation Types
+**Key Components:**
+- **11 Agent Skills** - Modular investigation workflows for incidents, users, devices, IoCs, authentication, and more
+- **5 MCP Server Integrations** - Sentinel Data Lake, Graph API, Defender XDR Triage, KQL Search, Microsoft Learn
+- **3 Local MCP Apps** - Interactive heatmaps, geographic attack maps, incident commenting
+- **Python Utilities** - HTML report generation with IP enrichment (geolocation, VPN detection, abuse scores)
 
-**User Security Investigations** - Analyze user accounts for anomalies, risky sign-ins, device compliance, and Identity Protection findings  
-**Honeypot Attack Analysis** - Assess honeypot servers for attack patterns, threat intelligence, and exploit attempts  
+### Capabilities
+
+- **Incident Triage** - Analyze Defender XDR and Sentinel incidents with entity extraction and recursive investigation
+- **User Investigation** - Sign-in anomalies, MFA status, device compliance, Identity Protection, HTML reports
+- **Device Investigation** - Defender alerts, vulnerabilities, logged-on users, process/network/file events
+- **IoC Analysis** - IP addresses, domains, URLs, file hashes with threat intelligence correlation
+- **Honeypot Analysis** - Attack patterns, threat intel, vulnerability assessment, executive reports
+- **KQL Query Authoring** - Schema-validated query generation with community examples
+- **Authentication Forensics** - SessionId tracing, token reuse vs MFA, geographic anomalies
+- **CA Policy Investigation** - Conditional Access failures, policy bypass detection
+- **Visualizations** - Interactive heatmaps and geographic attack maps
 
 ---
 
