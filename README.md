@@ -1,11 +1,11 @@
 # 🔒 Security Investigation Automation System
 
-**Comprehensive, automated security investigations powered by Microsoft Sentinel, Defender XDR, Graph API, and threat intelligence - with 11 specialized Agent Skills**
+**Comprehensive, automated security investigations powered by Microsoft Sentinel, Defender XDR, Graph API, and threat intelligence - with 12 specialized Agent Skills**
 
 An investigation automation framework that combines **GitHub Copilot**, **VS Code Agent Skills**, and **Model Context Protocol (MCP) servers** to enable natural language security investigations. Ask questions like *"Investigate this user for the last 7 days"* or *"Is this IP malicious?"* and get comprehensive analysis with KQL queries, threat intelligence correlation, and professional reports.
 
 **Key Components:**
-- **11 Agent Skills** - Modular investigation workflows for incidents, users, devices, IoCs, authentication, and more
+- **12 Agent Skills** - Modular investigation workflows for incidents, users, devices, IoCs, authentication, scope drift, and more
 - **5 MCP Server Integrations** - Sentinel Data Lake, Graph API, Defender XDR Triage, KQL Search, Microsoft Learn
 - **3 Local MCP Apps** - Interactive heatmaps, geographic attack maps, incident commenting
 - **Python Utilities** - HTML report generation with IP enrichment (geolocation, VPN detection, abuse scores)
@@ -20,6 +20,7 @@ An investigation automation framework that combines **GitHub Copilot**, **VS Cod
 - **KQL Query Authoring** - Schema-validated query generation with community examples
 - **Authentication Forensics** - SessionId tracing, token reuse vs MFA, geographic anomalies
 - **CA Policy Investigation** - Conditional Access failures, policy bypass detection
+- **Scope Drift Detection** - 90-day behavioral baseline vs 7-day comparison for service principals and user accounts
 - **Visualizations** - Interactive heatmaps and geographic attack maps
 
 ---
@@ -38,6 +39,7 @@ This system uses **[VS Code Agent Skills](https://code.visualstudio.com/docs/cop
 | **[kql-query-authoring](/.github/skills/kql-query-authoring/SKILL.md)** | KQL query creation using schema validation, community examples, Microsoft Learn | "write KQL", "create KQL query", "help with KQL", "query [table]" |
 | **[authentication-tracing](/.github/skills/authentication-tracing/SKILL.md)** | Azure AD authentication chain forensics: SessionId analysis, token reuse vs interactive MFA, geographic anomaly investigation | "trace authentication", "SessionId analysis", "token reuse", "geographic anomaly" |
 | **[ca-policy-investigation](/.github/skills/ca-policy-investigation/SKILL.md)** | Conditional Access policy forensics: sign-in failure correlation, policy state changes, security bypass detection | "Conditional Access", "CA policy", "device compliance", "policy bypass" |
+| **[scope-drift-detection](/.github/skills/scope-drift-detection/SKILL.md)** | Scope drift analysis for service principals AND user accounts: 90-day behavioral baseline vs 7-day recent activity, weighted Drift Score (5 dimensions for SPNs; 7 for user interactive; 6 for non-interactive), correlated with AuditLogs, SecurityAlert, DeviceNetworkEvents, Identity Protection | "scope drift", "service principal drift", "SPN behavioral change", "user drift", "baseline deviation" |
 | **[heatmap-visualization](/.github/skills/heatmap-visualization/SKILL.md)** | Interactive heatmap visualization for Sentinel data: attack patterns by time, activity grids, IP vs hour matrices, threat intel drill-down panels | "heatmap", "show heatmap", "visualize patterns", "activity grid" |
 | **[geomap-visualization](/.github/skills/geomap-visualization/SKILL.md)** | Interactive world map visualization for Sentinel data: attack origin maps, geographic threat distribution, IP geolocation with enrichment drill-down | "geomap", "world map", "geographic", "attack map", "attack origins" |
 
@@ -83,6 +85,8 @@ security-investigator/
 │       │   └── SKILL.md         # IoC analysis: IPs, domains, URLs, file hashes
 │       ├── kql-query-authoring/
 │       │   └── SKILL.md         # Schema-validated KQL query generation
+│       ├── scope-drift-detection/
+│       │   └── SKILL.md         # Behavioral baseline drift for SPNs and user accounts
 │       └── user-investigation/
 │           └── SKILL.md         # Comprehensive user security analysis
 ├── mcp-apps/                    # Local MCP servers (visualization, automation)
@@ -296,6 +300,8 @@ Skills are automatically detected based on keywords. You don't need to mention t
 | "Map the geographic origins of these attacks" | geomap-visualization |
 | "Write a KQL query to find failed sign-ins" | kql-query-authoring |
 | "Trace this authentication back to the original MFA" | authentication-tracing |
+| "Detect scope drift in service principals over the last 90 days" | scope-drift-detection |
+| "Run a user drift analysis for user@domain.com" | scope-drift-detection |
 
 ### Following Up on Investigations
 
@@ -355,7 +361,7 @@ This system is **designed for GitHub Copilot MCP integration** using **[VS Code 
 │            (Skill detection, universal patterns, routing)          │
 ├────────────────────────────────────────────────────────────────────┤
 │                     .github/skills/*.md                            │
-│      (11 specialized workflows with KQL, risk assessment)          │
+│      (12 specialized workflows with KQL, risk assessment)          │
 ├────────────────────────────────────────────────────────────────────┤
 │                        MCP Servers                                 │
 │  ┌─────────────┐  ┌──────────────┐  ┌───────────────────────────┐  │
@@ -868,7 +874,7 @@ Special thanks to the Microsoft Security community for sharing KQL queries and d
 
 **For detailed workflows, sample KQL queries, and troubleshooting:**
 → Read [.github/copilot-instructions.md](.github/copilot-instructions.md) (universal patterns, skill detection)
-→ Browse [.github/skills/](.github/skills/) (10 specialized investigation workflows)
+→ Browse [.github/skills/](.github/skills/) (12 specialized investigation workflows)
 
 ---
 
