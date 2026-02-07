@@ -28,6 +28,9 @@ archive/
 # Authoring (blog drafts and style guides)
 authoring/
 
+# Draft skills (work in progress, not yet published)
+drafts/
+
 # IDE
 .vscode/
 .idea/
