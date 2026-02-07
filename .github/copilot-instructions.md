@@ -98,6 +98,7 @@ Before querying any table for the first time in a session, verify the schema:
 | Table | Pitfall | Required Action |
 |-------|---------|----------------|
 | **SecurityAlert** | `Status` field is **immutable** — always "New" regardless of actual state | MUST join with `SecurityIncident` to get real Status/Classification (see [Appendix pattern](#securityalertstatus-is-immutable---always-join-securityincident)) |
+| **SecurityAlert** | `ProviderName` is an internal identifier (e.g., `MDATP`, `ASI Scheduled Alerts`, `MCAS`) and rolls up to generic names like `Microsoft XDR` at the incident level | Use **`ProductName`** for product grouping (e.g., `Azure Sentinel`, `Microsoft Defender Advanced Threat Protection`, `Microsoft Data Loss Prevention`). Also available: `ProductComponentName` (e.g., `Scheduled Alerts`, `NRT Alerts`). Translate raw values to current branding in reports. |
 | **SecurityIncident** | `AlertIds` contains **SystemAlertId GUIDs**, NOT usernames, IPs, or entity names | NEVER filter `AlertIds` by entity name. Instead: query `SecurityAlert` first filtering by `Entities has '<entity>'`, then join to `SecurityIncident` on AlertId |
 | **AuditLogs** | `InitiatedBy`, `TargetResources` are **dynamic fields** | Always wrap in `tostring()` before using `has` operator |
 | **AuditLogs** | `OperationName` values vary across providers | Use broad `has "keyword"` instead of exact match for discovery queries |

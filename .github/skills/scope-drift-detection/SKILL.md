@@ -121,14 +121,14 @@ This skill supports two output modes. **ASK the user which they prefer** if not 
 - Best for quick review and interactive follow-up questions
 
 ### Mode 2: Markdown File Report
-- Save a comprehensive report to `reports/scope_drift_<entity>_<timestamp>.md`
+- Save a comprehensive report to `reports/Scope_Drift_Report_<entity>_<timestamp>.md`
 - All ASCII visualizations render correctly inside markdown code fences (` ``` `)
 - Includes all data from inline mode plus additional detail sections
 - Use `create_file` tool — NEVER use terminal commands for file output
-- **Filename pattern:** `reports/scope_drift_<entity>_YYYYMMDD_HHMMSS.md`
-  - **User:** `scope_drift_<username>_YYYYMMDD_HHMMSS.md` (extract username from UPN, e.g., `officechris` from `officechris@stelznet.com`)
-  - **SPN (single):** `scope_drift_<spn_short_name>_YYYYMMDD_HHMMSS.md` (use display name, sanitized: lowercase, spaces/special chars replaced with hyphens)
-  - **SPN (all):** `scope_drift_all_spns_YYYYMMDD_HHMMSS.md` (tenant-wide scan of all service principals)
+- **Filename pattern:** `reports/Scope_Drift_Report_<entity>_YYYYMMDD_HHMMSS.md`
+  - **User:** `Scope_Drift_Report_<username>_YYYYMMDD_HHMMSS.md` (extract username from UPN, e.g., `officechris` from `officechris@stelznet.com`)
+  - **SPN (single):** `Scope_Drift_Report_<spn_short_name>_YYYYMMDD_HHMMSS.md` (use display name, sanitized: lowercase, spaces/special chars replaced with hyphens)
+  - **SPN (all):** `Scope_Drift_Report_all_spns_YYYYMMDD_HHMMSS.md` (tenant-wide scan of all service principals)
 
 ### Markdown Rendering Notes
 - ✅ ASCII tables, box-drawing characters, and bar charts render perfectly in markdown code blocks
@@ -425,24 +425,25 @@ let relevantAlerts = SecurityAlert
 | where Entities has_any (<SPN_IDS>) or Entities has_any (<SPN_NAMES>)
     or CompromisedEntity has_any (<SPN_NAMES>)
 | summarize arg_max(TimeGenerated, *) by SystemAlertId
-| project SystemAlertId, AlertName, AlertSeverity, ProviderName, Tactics, TimeGenerated;
+| project SystemAlertId, AlertName, AlertSeverity, ProductName, ProductComponentName, Tactics, TimeGenerated;
 SecurityIncident
 | where CreatedTime > ago(97d)
 | summarize arg_max(TimeGenerated, *) by IncidentNumber
 | mv-expand AlertId = AlertIds
 | extend AlertId = tostring(AlertId)
 | join kind=inner relevantAlerts on $left.AlertId == $right.SystemAlertId
+| extend Period = iff(TimeGenerated1 < ago(7d), "Baseline", "Recent")
 | summarize
-    AlertCount = count(),
-    AlertNames = make_set(AlertName, 15),
+    BaselineAlerts = countif(Period == "Baseline"),
+    RecentAlerts = countif(Period == "Recent"),
+    TotalAlerts = count(),
     Severities = make_set(AlertSeverity, 5),
-    Tactics = make_set(Tactics, 10),
-    LatestAlert = max(TimeGenerated1),
     IncidentStatuses = make_set(Status, 5),
     Classifications = make_set(Classification, 5),
-    IncidentCount = dcount(IncidentNumber)
+    BaselineIncidents = dcountif(IncidentNumber, Period == "Baseline"),
+    RecentIncidents = dcountif(IncidentNumber, Period == "Recent")
     by ProductName
-| order by AlertCount desc
+| order by TotalAlerts desc
 ```
 
 **Interpreting Incident Status in Drift Context:**
@@ -455,7 +456,7 @@ SecurityIncident
 
 **Product Name Mapping (Legacy → Current Branding):**
 
-The `ProductName` field in `SecurityAlert` uses legacy names. When rendering reports, translate to current Microsoft branding:
+The `ProductName` field in `SecurityAlert` contains the detection product. When rendering reports, translate to current Microsoft branding:
 
 | SecurityAlert.ProductName (raw) | Report Display Name |
 |--------------------------------|---------------------|
@@ -467,7 +468,9 @@ The `ProductName` field in `SecurityAlert` uses legacy names. When rendering rep
 | Office 365 Advanced Threat Protection | **Microsoft Defender for Office 365** |
 | Azure Advanced Threat Protection | **Microsoft Defender for Identity** |
 
-Group alerts by product in the report, using the current name as the section header, with individual alert names as rows within each product section.
+**Note:** `ProviderName` (e.g., `ASI Scheduled Alerts`, `MDATP`, `MCAS`) is the internal provider identifier. `ProductName` (e.g., `Azure Sentinel`, `Microsoft Defender Advanced Threat Protection`) is the user-facing product name. Always use `ProductName` for grouping and display; `ProviderName` is unreliable for product identification (e.g., all alerts show as `Microsoft XDR` at the incident level).
+
+**Report Rendering:** Group alerts by product using the current branded name. Show **Baseline Alerts vs Recent Alerts** and **Baseline Incidents vs Recent Incidents** columns per product row, plus Severity and Classification. Include a **Total** row. Add a brief 1-2 sentence summary comparing alert volume between periods. Do NOT list individual alert names — keep the table concise at the product level.
 
 ### Query 5: DeviceNetworkEvents Correlation
 
@@ -629,24 +632,25 @@ let relevantAlerts = SecurityAlert
 | where TimeGenerated > ago(97d)
 | where Entities has '<UPN>' or CompromisedEntity has '<UPN>'
 | summarize arg_max(TimeGenerated, *) by SystemAlertId
-| project SystemAlertId, AlertName, AlertSeverity, ProviderName, Tactics, TimeGenerated;
+| project SystemAlertId, AlertName, AlertSeverity, ProductName, ProductComponentName, Tactics, TimeGenerated;
 SecurityIncident
 | where CreatedTime > ago(97d)
 | summarize arg_max(TimeGenerated, *) by IncidentNumber
 | mv-expand AlertId = AlertIds
 | extend AlertId = tostring(AlertId)
 | join kind=inner relevantAlerts on $left.AlertId == $right.SystemAlertId
+| extend Period = iff(TimeGenerated1 < ago(7d), "Baseline", "Recent")
 | summarize
-    AlertCount = count(),
-    AlertNames = make_set(AlertName, 15),
+    BaselineAlerts = countif(Period == "Baseline"),
+    RecentAlerts = countif(Period == "Recent"),
+    TotalAlerts = count(),
     Severities = make_set(AlertSeverity, 5),
-    Tactics = make_set(Tactics, 10),
-    LatestAlert = max(TimeGenerated1),
     IncidentStatuses = make_set(Status, 5),
     Classifications = make_set(Classification, 5),
-    IncidentCount = dcount(IncidentNumber)
+    BaselineIncidents = dcountif(IncidentNumber, Period == "Baseline"),
+    RecentIncidents = dcountif(IncidentNumber, Period == "Recent")
     by ProductName
-| order by AlertCount desc
+| order by TotalAlerts desc
 ```
 
 **Interpreting Incident Status in Drift Context:**
@@ -656,6 +660,8 @@ SecurityIncident
 | Closed | FalsePositive | 🟢 False alarm — discount from drift risk, note as noise |
 | Closed | BenignPositive | 🟡 Expected behavior — note but don't escalate |
 | Active/New | Any | 🟠 Unresolved — flag for attention, may indicate ongoing threat |
+
+**Report Rendering:** Same rules as Query 4 — show Baseline vs Recent alert/incident counts per product, with a Total row and brief summary. Do NOT list individual alert names.
 
 ---
 
