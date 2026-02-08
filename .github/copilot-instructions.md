@@ -351,7 +351,7 @@ Execute KQL queries and explore table schemas directly against your Sentinel wor
 ### Microsoft Sentinel Triage MCP
 Incident investigation and threat hunting tools for Defender XDR and Sentinel:
 - **Incident Management**: List/get incidents (`ListIncidents`, `GetIncidentById`), list/get alerts (`ListAlerts`, `GetAlertByID`)
-- **Advanced Hunting**: Run KQL queries across Defender tables (`RunAdvancedHuntingQuery`), fetch table schemas (`FetchAdvancedHuntingTablesOverview`, `FetchAdvancedHuntingTablesDetailedSchema`)
+- **Advanced Hunting**: Run KQL queries across Defender XDR tables and connected Log Analytics workspace tables (`RunAdvancedHuntingQuery`), fetch table schemas (`FetchAdvancedHuntingTablesOverview`, `FetchAdvancedHuntingTablesDetailedSchema`)
 - **Entity Investigation**: File info/stats/alerts (`GetDefenderFileInfo`, `GetDefenderFileStatistics`, `GetDefenderFileAlerts`), device details (`GetDefenderMachine`, `GetDefenderMachineAlerts`, `GetDefenderMachineLoggedOnUsers`), IP analysis (`GetDefenderIpAlerts`, `GetDefenderIpStatistics`), user activity (`ListUserRelatedAlerts`, `ListUserRelatedMachines`)
 - **Vulnerability Management**: List affected devices (`ListDefenderMachinesByVulnerability`), software vulnerabilities (`ListDefenderVulnerabilitiesBySoftware`)
 - **Remediation**: List/get remediation tasks (`ListDefenderRemediationActivities`, `GetDefenderRemediationActivity`)
@@ -362,8 +362,10 @@ Incident investigation and threat hunting tools for Defender XDR and Sentinel:
 
 **Two KQL execution tools are available. Each has trade-offs:**
 
-| Factor | `RunAdvancedHuntingQuery` (Defender XDR) | `mcp_sentinel-data_query_lake` (Sentinel Data Lake) |
-|--------|------------------------------------------|-----------------------------------------------------|
+> **Scope clarification:** `RunAdvancedHuntingQuery` operates through the **unified Advanced Hunting** in the Defender portal. When a Sentinel/Log Analytics workspace is connected to the unified portal, Advanced Hunting can query **both** Defender XDR-native tables (Device*, Email*, etc.) **and** connected Log Analytics workspace tables (e.g., `AzureDiagnostics`, `Syslog`, and other LA tables streamed into AH). It is NOT limited to Defender XDR data only.
+
+| Factor | `RunAdvancedHuntingQuery` (Advanced Hunting — unified portal) | `mcp_sentinel-data_query_lake` (Sentinel Data Lake) |
+|--------|---------------------------------------------------------------|------------------------------------------------------|
 | **Cost** | Free (included in Defender license) | Billed per query (Log Analytics ingestion costs) |
 | **Retention** | 30 days | 90+ days (workspace-configured) |
 | **Timestamp column** | `Timestamp` | `TimeGenerated` |
@@ -379,8 +381,9 @@ For **every** KQL query, determine the tool based on the **table prefix**:
 | Category | Table prefixes / names | Tool |
 |----------|----------------------|------|
 | **Sentinel-native** | SigninLogs, AuditLogs, SecurityAlert, SecurityIncident, SecurityEvent, OfficeActivity, AADUserRiskEvents, Syslog, CommonSecurityLog, ThreatIntelligenceIndicator, Heartbeat, custom `*_CL` tables | **Data Lake only** |
-| **XDR — Advanced Hunting only** | `DeviceTvm*`, `AAD*Beta`, `EntraId*`, `Campaign*`, `Message*`, `DataSecurity*`, `Exposure*`, `Disruption*`, `GraphApi*`, `OAuth*`, `AI*`, `AzureDiagnostics` | **Advanced Hunting only** |
-| **XDR — available in both** | `Device*` (non-Tvm), `Alert*`, `Email*`, `Identity*`, `Cloud*`, `Behavior*`, `Url*`, `FileMaliciousContentInfo` | **See Step 2** |
+| **XDR-native — Advanced Hunting only** | `DeviceTvm*`, `AAD*Beta`, `EntraId*`, `Campaign*`, `Message*`, `DataSecurity*`, `Exposure*`, `Disruption*`, `GraphApi*`, `OAuth*`, `AI*` | **Advanced Hunting only** |
+| **Log Analytics via AH** | `AzureDiagnostics`, and other LA tables streamed into unified Advanced Hunting (workspace-dependent) | **Advanced Hunting only** (not a Defender table — available because LA workspace is connected to unified portal) |
+| **Available in both** | `Device*` (non-Tvm), `Alert*`, `Email*`, `Identity*`, `Cloud*`, `Behavior*`, `Url*`, `FileMaliciousContentInfo` | **See Step 2** |
 
 **Step 2 — For tables available in both, choose by context:**
 
@@ -410,8 +413,9 @@ If the query is from a `.md` file in `queries/` or `.github/skills/` and uses `T
 | Sentinel-native (SigninLogs, AuditLogs, SecurityAlert, etc.) | Data Lake | — |
 | `Device*` (non-Tvm), `Alert*`, `Email*`, `Identity*`, `Cloud*` ≤ 30d | Advanced Hunting | Data Lake |
 | `Device*` (non-Tvm), `Alert*`, `Email*`, `Identity*`, `Cloud*` > 30d | Data Lake | Advanced Hunting |
-| `DeviceTvm*`, `AzureDiagnostics` | Advanced Hunting | — |
-| `AAD*Beta`, `EntraId*`, `Exposure*`, `Message*`, other AH-only | Advanced Hunting | — |
+| `DeviceTvm*` | Advanced Hunting | — |
+| `AzureDiagnostics`, other LA tables in unified AH | Advanced Hunting | — |
+| `AAD*Beta`, `EntraId*`, `Exposure*`, `Message*`, other XDR-native AH-only | Advanced Hunting | — |
 | Custom tables (`*_CL`) | Data Lake | — |
 
 ### KQL Search MCP
