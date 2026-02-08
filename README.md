@@ -331,7 +331,7 @@ copy .vscode/mcp.json.template .vscode/mcp.json
 
 The template includes inline documentation for each server. On first use, VS Code will prompt for:
 - **Entra ID login** — browser-based auth for Sentinel Data Lake, Graph, and Triage servers
-- **GitHub PAT** — for KQL Search MCP (schema intelligence and query discovery)
+- **[GitHub PAT](https://github.com/settings/tokens/new)** — for KQL Search MCP (schema intelligence and query discovery). Needs `public_repo` scope.
 
 See [MCP Server Setup](#-mcp-server-setup) below for per-server permissions and installation guides.
 
@@ -368,7 +368,7 @@ The system **requires** five Model Context Protocol (MCP) servers. All five are 
 | 1 | **Sentinel Data Lake** | KQL queries on Log Analytics | [Setup](https://learn.microsoft.com/en-us/copilot/security/developer/mcp-get-started) | Log Analytics Reader |
 | 2 | **Microsoft Graph** | User identity, devices, risk | [Setup](https://learn.microsoft.com/en-us/graph/mcp-server/get-started?tabs=http%2Cvscode) | User.Read.All, Device.Read.All |
 | 3 | **Sentinel Triage** | Advanced Hunting, Defender XDR | [Setup](https://learn.microsoft.com/en-us/azure/sentinel/datalake/sentinel-mcp-triage-tool) | SecurityReader |
-| 4 | **KQL Search** | Schema validation, query examples | [Setup](https://www.npmjs.com/package/kql-search-mcp) | GitHub PAT (`public_repo`) |
+| 4 | **KQL Search** | Schema validation, query examples | [Setup](https://www.npmjs.com/package/kql-search-mcp) | [GitHub PAT](https://github.com/settings/tokens/new) (`public_repo`) |
 | 5 | **Microsoft Learn** | Official docs and code samples | [Setup](https://github.com/MicrosoftDocs/mcp) | None (free) |
 
 ### 1. Microsoft Sentinel MCP Server
