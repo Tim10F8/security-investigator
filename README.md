@@ -271,15 +271,23 @@ Each file uses a standardized metadata header for efficient `grep_search` discov
 |-------------|---------|
 | **VS Code** | Version 1.99+ recommended (Agent mode + MCP support). [VS Code Insiders](https://code.visualstudio.com/insiders/) required for MCP Apps (visualization). |
 | **GitHub Copilot** | Active subscription — [Copilot Pro+](https://github.com/features/copilot), Business, or Enterprise. Agent mode must be enabled. |
-| **Python 3.8+** | For IP enrichment utility and report generation. |
-| **Node.js 18+** | Required for KQL Search MCP (`npx`) and building local MCP Apps. |
+| **Python 3.8+** | For IP enrichment utility and report generation. [Download](https://www.python.org/downloads/) |
+| **Node.js 18+** | Required for KQL Search MCP (`npx`) and building local MCP Apps. [Download](https://nodejs.org/) or install via `winget install OpenJS.NodeJS.LTS` (Windows) / `brew install node` (macOS). |
 | **Microsoft Sentinel** | Log Analytics workspace with data. You'll need the workspace GUID and tenant ID. |
 | **Azure AD Permissions** | See [MCP Server Setup](#-mcp-server-setup) for per-server permission requirements. |
 | **GitHub PAT** | `public_repo` scope — [Create one here](https://github.com/settings/tokens/new). Used by KQL Search MCP. |
 
 ### 1. Install Dependencies
 
+Verify prerequisites:
 ```powershell
+python --version   # Requires 3.8+
+node --version      # Requires 18+ (needed for KQL Search MCP)
+```
+
+If Node.js is missing: [Download](https://nodejs.org/) or run `winget install OpenJS.NodeJS.LTS` (Windows) / `brew install node` (macOS).
+
+Set up Python environment:
 python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 pip install -r requirements.txt
