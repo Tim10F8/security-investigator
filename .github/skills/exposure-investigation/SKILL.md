@@ -80,7 +80,7 @@ This skill generates a comprehensive **Vulnerability & Exposure Management Repor
 Compact executive summary rendered directly in chat.
 
 ### Mode 2: Markdown File Report
-Full detailed report saved to `reports/exposure/vulnerability_exposure_report_<YYYYMMDD>.md`.
+Full detailed report saved to `reports/exposure/vulnerability_exposure_report_<YYYYMMDD_HHMMSS>.md`.
 
 ### Mode 3: Both (default when user says "report" or "generate report")
 Inline chat executive summary + full markdown file.
@@ -282,22 +282,30 @@ DeviceTvmSecureConfigurationAssessment
 
 ### Query 7: Critical Asset Inventory
 
+> **🔴 MCP Property Access:** `NodeProperties` is stored as a JSON string. Direct dot-notation (`NodeProperties.rawData.criticalityLevel`) returns null through MCP serialization. MUST use double `parse_json(tostring())` extraction — see [Known Pitfalls](#known-pitfalls).
+
 ```kql
 ExposureGraphNodes
 | where set_has_element(Categories, "device")
-| where isnotnull(NodeProperties.rawData.criticalityLevel)
-| where NodeProperties.rawData.criticalityLevel.criticalityLevel < 4
-| extend CriticalityLevel = tostring(NodeProperties.rawData.criticalityLevel.criticalityLevel)
-| extend InternetFacing = iff(isnotnull(NodeProperties.rawData.IsInternetFacing), "Yes", "No")
-| extend VulnerableToRCE = iff(isnotnull(NodeProperties.rawData.vulnerableToRCE), "Yes", "No")
-| extend VulnerableToPrivEsc = iff(isnotnull(NodeProperties.rawData.VulnerableToPrivilegeEscalation), "Yes", "No")
+| extend rawData = parse_json(tostring(parse_json(tostring(NodeProperties)).rawData))
+| extend critLevel = rawData.criticalityLevel
+| extend critValue = toint(critLevel.criticalityLevel)
+| extend ruleBasedCrit = toint(critLevel.ruleBasedCriticalityLevel)
+| extend ruleNames = tostring(critLevel.ruleNames)
+| where isnotnull(critLevel) and critValue < 4
+| extend InternetFacing = iff(isnotnull(rawData.IsInternetFacing), "Yes", "No")
+| extend VulnerableToRCE = iff(isnotnull(rawData.vulnerableToRCE), "Yes", "No")
+| extend VulnerableToPrivEsc = iff(isnotnull(rawData.VulnerableToPrivilegeEscalation), "Yes", "No")
+| extend ExposureScore = tostring(rawData.exposureScore)
 | project 
     DeviceName = NodeName,
-    CriticalityLevel,
+    CriticalityLevel = critValue,
+    RuleBasedCriticality = ruleBasedCrit,
+    RuleNames = ruleNames,
     InternetFacing,
     VulnerableToRCE,
     VulnerableToPrivEsc,
-    Categories,
+    ExposureScore,
     NodeLabel
 | order by CriticalityLevel asc
 ```
@@ -308,6 +316,8 @@ ExposureGraphNodes
 - **0-1**: Most critical (domain controllers, high-value servers)
 - **2-3**: High priority
 - **4+**: Standard (excluded from this query)
+
+> **Note on zero results:** If this query returns 0 results, it means no devices have criticality classifications. Check the raw `NodeProperties` with `ExposureGraphNodes | where set_has_element(Categories, "device") | extend rawData = parse_json(tostring(parse_json(tostring(NodeProperties)).rawData)) | project NodeName, rawData | take 5` to verify property structure. Criticality is auto-assigned for domain controllers (Level 0) and can be manually assigned in the Exposure Management portal.
 
 ---
 
@@ -426,13 +436,14 @@ DeviceTvmSecureConfigurationAssessment
 ```kql
 ExposureGraphNodes
 | where set_has_element(Categories, "device")
-| extend HasHighCritVulns = isnotnull(NodeProperties.rawData.highRiskVulnerabilityInsights) 
-    and tostring(parse_json(tostring(NodeProperties.rawData.highRiskVulnerabilityInsights)).hasHighOrCritical) == "true"
-| extend VulnerableToRCE = isnotnull(NodeProperties.rawData.vulnerableToRCE)
-| extend VulnerableToPrivEsc = isnotnull(NodeProperties.rawData.VulnerableToPrivilegeEscalation)
-| extend InternetFacing = isnotnull(NodeProperties.rawData.IsInternetFacing)
-| extend IsCritical = isnotnull(NodeProperties.rawData.criticalityLevel) 
-    and NodeProperties.rawData.criticalityLevel.criticalityLevel < 4
+| extend rawData = parse_json(tostring(parse_json(tostring(NodeProperties)).rawData))
+| extend HasHighCritVulns = isnotnull(rawData.highRiskVulnerabilityInsights) 
+    and tostring(parse_json(tostring(rawData.highRiskVulnerabilityInsights)).hasHighOrCritical) == "true"
+| extend VulnerableToRCE = isnotnull(rawData.vulnerableToRCE)
+| extend VulnerableToPrivEsc = isnotnull(rawData.VulnerableToPrivilegeEscalation)
+| extend InternetFacing = isnotnull(rawData.IsInternetFacing)
+| extend critLevel = rawData.criticalityLevel
+| extend IsCritical = isnotnull(critLevel) and toint(critLevel.criticalityLevel) < 4
 | summarize 
     TotalDevices = count(),
     HighCritVulnDevices = countif(HasHighCritVulns),
@@ -460,8 +471,9 @@ ExposureGraphNodes
 ```kql
 let VulnDevices = ExposureGraphNodes
 | where set_has_element(Categories, "device")
-| where isnotnull(NodeProperties.rawData.highRiskVulnerabilityInsights)
-| extend HasHighCritVulns = tostring(parse_json(tostring(NodeProperties.rawData.highRiskVulnerabilityInsights)).hasHighOrCritical) == "true"
+| extend rawData = parse_json(tostring(parse_json(tostring(NodeProperties)).rawData))
+| where isnotnull(rawData.highRiskVulnerabilityInsights)
+| extend HasHighCritVulns = tostring(parse_json(tostring(rawData.highRiskVulnerabilityInsights)).hasHighOrCritical) == "true"
 | where HasHighCritVulns
 | project NodeId;
 let TargetNodes = ExposureGraphNodes
@@ -560,6 +572,8 @@ DeviceTvmSecureConfigurationAssessment
 
 ### Query 13: Certificate Expiration Status
 
+> **🔴 CRITICAL:** `DeviceTvmCertificateInfo` does **NOT** have a `DeviceName` column. You **MUST** join with `DeviceInfo` to resolve device names. Using `DeviceName` directly will fail with `SemanticError: Failed to resolve scalar expression named 'DeviceName'`. The query below already includes the required join. If the table returns empty or error, skip gracefully — it requires Defender Vulnerability Management add-on licensing.
+
 ```kql
 DeviceTvmCertificateInfo
 | extend Status = case(
@@ -605,14 +619,15 @@ DeviceTvmSoftwareVulnerabilities
 ```kql
 ExposureGraphNodes
 | where set_has_element(Categories, "device")
-| where isnotnull(NodeProperties.rawData.criticalityLevel)
-| where NodeProperties.rawData.criticalityLevel.criticalityLevel < 4
-| where isnotnull(NodeProperties.rawData.IsInternetFacing)
-| extend VulnerableToRCE = isnotnull(NodeProperties.rawData.vulnerableToRCE)
-| extend VulnerableToPrivEsc = isnotnull(NodeProperties.rawData.VulnerableToPrivilegeEscalation)
+| extend rawData = parse_json(tostring(parse_json(tostring(NodeProperties)).rawData))
+| extend critLevel = rawData.criticalityLevel
+| where isnotnull(critLevel) and toint(critLevel.criticalityLevel) < 4
+| where isnotnull(rawData.IsInternetFacing)
+| extend VulnerableToRCE = isnotnull(rawData.vulnerableToRCE)
+| extend VulnerableToPrivEsc = isnotnull(rawData.VulnerableToPrivilegeEscalation)
 | project 
     DeviceName = NodeName,
-    CriticalityLevel = tostring(NodeProperties.rawData.criticalityLevel.criticalityLevel),
+    CriticalityLevel = toint(critLevel.criticalityLevel),
     VulnerableToRCE,
     VulnerableToPrivEsc,
     NodeLabel
@@ -629,12 +644,16 @@ ExposureGraphNodes
 
 ```kql
 let IdentitiesAndCriticalDevices = ExposureGraphNodes
+| extend rawData = parse_json(tostring(parse_json(tostring(NodeProperties)).rawData))
+| extend HasRCEVuln = isnotnull(rawData.vulnerableToRCE)
+| extend CritLevel = toint(rawData.criticalityLevel.criticalityLevel)
+| extend HasCritLevel = isnotnull(rawData.criticalityLevel)
 | where 
     (set_has_element(Categories, "device") and 
         (
-            (isnotnull(NodeProperties.rawData.criticalityLevel) and NodeProperties.rawData.criticalityLevel.criticalityLevel < 4)
+            (HasCritLevel and CritLevel < 4)
             or 
-            isnotnull(NodeProperties.rawData.vulnerableToRCE)
+            HasRCEVuln
         )
     )
     or 
@@ -647,13 +666,13 @@ ExposureGraphEdges
         CanConnectAs.EdgeLabel =~ "can authenticate as" and
         CanRemoteLogin.EdgeLabel =~ "CanRemoteInteractiveLogonTo" and
         set_has_element(Identity.Categories, "identity") and 
-        set_has_element(DeviceWithRCE.Categories, "device") and isnotnull(DeviceWithRCE.NodeProperties.rawData.vulnerableToRCE) and
-        set_has_element(CriticalDevice.Categories, "device") and isnotnull(CriticalDevice.NodeProperties.rawData.criticalityLevel)
+        set_has_element(DeviceWithRCE.Categories, "device") and DeviceWithRCE.HasRCEVuln and
+        set_has_element(CriticalDevice.Categories, "device") and CriticalDevice.HasCritLevel
     project 
         RCEDeviceName = DeviceWithRCE.NodeName,
         IdentityName = Identity.NodeName,
         CriticalDeviceName = CriticalDevice.NodeName,
-        CriticalityLevel = tostring(CriticalDevice.NodeProperties.rawData.criticalityLevel.criticalityLevel)
+        CriticalityLevel = tostring(CriticalDevice.CritLevel)
 | order by CriticalityLevel asc
 ```
 
@@ -738,7 +757,7 @@ Compute an overall risk rating based on query results:
 2. 🟠 <Action 2 — e.g., Remediate Y Impact-9 security misconfigurations>
 3. ⚠️ <Action 3 — e.g., Upgrade Z end-of-support software>
 
-📄 Full report: reports/exposure/vulnerability_exposure_report_<YYYYMMDD>.md
+📄 Full report: reports/exposure/vulnerability_exposure_report_<YYYYMMDD_HHMMSS>.md
 ```
 
 ### Markdown File Structure
@@ -887,11 +906,12 @@ When user specifies a device name, scope all DeviceTvm queries to that device:
 | `DeviceTvmBrowserExtensions` may be empty | No browser extension data | Skip section, note as "No browser extension data available" |
 
 | `RemediationOptions` in KB tables contains HTML | Raw HTML in output | Strip HTML tags when rendering in markdown: remove `<br/>`, `<ol>`, `<li>`, `<a>` tags, convert to plain text bullet points |
-| `NodeProperties` is deeply nested dynamic JSON | Dot-notation access varies | Always use `NodeProperties.rawData.<field>` pattern |
+| `NodeProperties` is a JSON string, NOT a parsed dynamic object | Direct dot-notation like `NodeProperties.rawData.criticalityLevel` returns null through MCP JSON serialization — queries silently return 0 results | **MUST** use double `parse_json(tostring())` extraction: `parse_json(tostring(parse_json(tostring(NodeProperties)).rawData))` then access sub-properties. This is the ONLY reliable pattern for `NodeProperties` access. See Q7, Q10a, Q10b, Q15, Q16 for canonical examples |
 | `ConfigurationBenchmarks` in KB contains benchmark mappings | Can enrich report | Optional: extract CIS/NIST benchmark references for compliance mapping |
 | DeviceTvm assessments refresh periodically | Data may be 12-24h old | Note data freshness in report appendix |
 | `graph-match` queries can be slow on large graphs | Timeout possible | Filter nodes BEFORE `make-graph` to reduce graph size |
-| `graph-match` `project` produces dynamic-typed columns | `order by` fails with "key can't be of dynamic type" | Always wrap `graph-match` projected fields in `tostring()` / `tolong()` before using in `order by` |
+| `parse_json()` and `graph-match project` produce dynamic-typed columns | `order by` fails with "key can't be of dynamic type" error | Always wrap in explicit type casts (`toint()`, `tostring()`, `tolong()`) before using in `order by`, `summarize`, or comparisons. Applies to ALL `parse_json()` output — not just `graph-match`. Example: `| extend critValue = toint(rawData.criticalityLevel.criticalityLevel)` then `| order by critValue asc` |
+| `DeviceTvmInfoGathering` table exists but is NOT used by this skill | Agent may attempt to query it for Defender health data, causing errors due to unfamiliar schema | Defender sensor health is covered by Q9 (SCIDs in `DeviceTvmSecureConfigurationAssessment`). Do NOT improvise queries against `DeviceTvmInfoGathering` — its schema differs from other DeviceTvm* tables and is not documented here |
 | `DeviceTvmCertificateInfo` has NO `DeviceName` column | `Failed to resolve scalar expression named 'DeviceName'` | Join with `DeviceInfo \| summarize arg_max(Timestamp, DeviceName) by DeviceId` to resolve device names |
 | `Context` in `DeviceTvmSecureConfigurationAssessment` is double-nested JSON | First `parse_json(Context)` returns an array of JSON strings; items need a second `parse_json()` to extract values | Use `parse_json(tostring(parse_json(Context)[0]))[N]` — e.g., `[0]` for AV mode code, `[2]` for signature date |
 | SCID numbers are OS-specific — same control has different IDs per platform | Querying Windows SCIDs on macOS/Linux returns `IsApplicable=0` | Use the SCID mapping: Windows `2010-2030`, macOS `5090-5095`, Linux `6090-6095`. Q9/Q11 normalize OS-specific SCIDs to unified control names |

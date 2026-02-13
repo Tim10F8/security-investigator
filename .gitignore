@@ -29,6 +29,9 @@ authoring/
 # Draft skills (work in progress, not yet published)
 drafts/
 
+# Personal notes (not for repo)
+notes/
+
 # IDE
 .vscode/*
 !.vscode/mcp.json.template

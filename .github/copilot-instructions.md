@@ -129,7 +129,7 @@ Before querying any table for the first time in a session, verify the schema:
 | **SecurityIncident** | `AlertIds` contains **SystemAlertId GUIDs**, NOT usernames, IPs, or entity names | NEVER filter `AlertIds` by entity name. Instead: query `SecurityAlert` first filtering by `Entities has '<entity>'`, then join to `SecurityIncident` on AlertId |
 | **AuditLogs** | `InitiatedBy`, `TargetResources` are **dynamic fields** | Always wrap in `tostring()` before using `has` operator |
 | **AuditLogs** | `OperationName` values vary across providers | Use broad `has "keyword"` instead of exact match for discovery queries |
-| **SigninLogs** / **AADNonInteractiveUserSignInLogs** | `DeviceDetail`, `LocationDetails`, `ConditionalAccessPolicies` may be **dynamic OR string** depending on workspace (Data Lake workspaces store them as strings). `AADNonInteractiveUserSignInLogs` stores these as **string always** | Always use `tostring(parse_json(DeviceDetail).operatingSystem)` — works for both types. Direct dot-notation `DeviceDetail.operatingSystem` fails with SemanticError when column is string type. Same applies to `ConditionalAccessPolicies` — use `parse_json(ConditionalAccessPolicies)` before `mv-expand` or property access |
+| **SigninLogs** / **AADNonInteractiveUserSignInLogs** | `DeviceDetail`, `LocationDetails`, `ConditionalAccessPolicies`, `Status` may be **dynamic OR string** depending on workspace (Data Lake workspaces store them as strings). `AADNonInteractiveUserSignInLogs` stores these as **string always** | Always use `tostring(parse_json(DeviceDetail).operatingSystem)` — works for both types. Direct dot-notation `DeviceDetail.operatingSystem` fails with SemanticError when column is string type. Same applies to `Status` (use `parse_json(Status).errorCode`), `ConditionalAccessPolicies` — use `parse_json()` before dot-access or `mv-expand` |
 | **SigninLogs** | `Location` is a **string** column, NOT dynamic. Dot-notation like `Location.countryOrRegion` will fail with SemanticError | Use `parse_json(LocationDetails).countryOrRegion` for geographic sub-properties. `Location` works with `dcount()`, `has`, `isnotempty()` but NOT dot-property access |
 | **AADUserRiskEvents** | May have different retention than SigninLogs | Cross-reference with `SigninLogs` `RiskLevelDuringSignIn` for complete picture |
 | **OfficeActivity** | Mailbox forwarding/redirect rules live here, **NOT in AuditLogs** | Filter by `OfficeWorkload == "Exchange"` and `Operation in~ ("New-InboxRule", "Set-InboxRule", "Set-Mailbox", "UpdateInboxRules")`. Check `Parameters` for `ForwardTo`, `RedirectTo`, `ForwardingSmtpAddress`. This table is the **primary source** for detecting email exfiltration via forwarding rules (MITRE T1114.003 / T1020). |
@@ -409,9 +409,9 @@ When switching between tools, adapt the timestamp column:
 
 **Step 4 — Pre-authored query files:**
 
-If the query is from a `.md` file in `queries/` or `.github/skills/` and uses `Timestamp`, run it via **Advanced Hunting as-written** (it was authored for that tool). Only switch to Data Lake if:
-- Lookback exceeds 30 days, OR
-- The query is blocked by the safety filter
+If the query is from a `.md` file in `queries/` or `.github/skills/`:
+- Uses `Timestamp` → run via **Advanced Hunting as-written** (it was authored for that tool). Only switch to Data Lake if lookback exceeds 30 days or the query is blocked by the safety filter.
+- Uses `TimeGenerated` → run via **Data Lake as-written** (it was authored for that tool). This applies even for `Cloud*` tables — skill authors chose Data Lake deliberately for 90-day retention coverage.
 
 #### Quick Reference
 
@@ -555,14 +555,14 @@ Direct Azure Resource Manager and Azure Monitor integration for quick ad-hoc que
 | **Auth** | DefaultAzureCredential (VS Code cached) | Sentinel Platform Services OAuth |
 | **Params** | Needs `resource-group` + `workspace` name + `table` | Needs `workspaceId` (GUID) |
 | **Retention** | 90 days | 90 days (same workspace) |
-| **Telemetry** | AppId `1950a258` via `AzurePowerShellCredential` — detectable via UserAgent `azsdk-net-Identity (.NET 9.x)` in SigninLogs, `csharpsdk,LogAnalyticsPSClient` in LAQueryLogs | Under Sentinel MCP AppId (distinguishable) |
+| **Telemetry** | AppId `04b07795` via Azure CLI credential — `RequestClientApp` is **empty** in LAQueryLogs (not a unique fingerprint). Azure MCP appends `\n| limit N` to query text as best differentiator. 🔄 Previously `1950a258` + `csharpsdk,LogAnalyticsPSClient` — obsolete. | Under Sentinel MCP AppId (distinguishable) |
 | **Best for** | Quick lookups, AzureActivity, ad-hoc exploration | Skill-based investigation workflows |
 
-**🔍 Azure MCP Server Detection (Field-Tested Feb 2026):** Azure MCP Server IS identifiable through composite signal analysis. It uses `DefaultAzureCredential` → `AzurePowerShellCredential` chain, producing AppId `1950a258-227b-4e31-a9cf-717495945fc2`. Distinguish from Azure PowerShell AND other Azure SDK services via:
-- **SigninLogs:** AppId `1950a258` + UserAgent `azsdk-net-Identity/1.x.x (.NET 9.x.x; Microsoft Windows ...)` — the `Microsoft Windows` OS filter is CRITICAL because `azsdk-net-Identity` is shared by cloud services (e.g., Security Copilot API `bb3d68c2` on `CBL-Mariner/Linux`)
-- **LAQueryLogs:** RequestClientApp `csharpsdk,LogAnalyticsPSClient` (PowerShell uses `PSClient,LogAnalyticsPSClient`)
-- **AzureActivity:** Claims.appid `1950a258` (write operations only — reads not logged, ~2-4h ingestion lag)
-- **Token caching:** Sign-in events represent token acquisitions (~1hr lifetime), NOT individual API calls. Count sign-in clusters as "access sessions".
+**🔍 Azure MCP Server Detection (🔄 Updated Feb 2026):** Azure MCP Server now uses `DefaultAzureCredential` → **Azure CLI** credential, producing AppId `04b07795-8ddb-461a-bbee-02f9e1bf7b46`. The previously documented fingerprint (AppId `1950a258` + `csharpsdk,LogAnalyticsPSClient`) is **obsolete** — only 1 occurrence found in 30-day lookback.
+- **SigninLogs:** AppId `04b07795` — shared with manual Azure CLI, no unique sign-in fingerprint for Azure MCP
+- **LAQueryLogs:** AADClientId `04b07795`, `RequestClientApp` is **empty**. Best differentiator: Azure MCP `monitor_workspace_log_query` appends `\n| limit N` to query text
+- **AzureActivity:** Claims.appid `04b07795` (write operations only — reads not logged, ~2-4h ingestion lag)
+- **Token caching:** Sign-in events represent token acquisitions, NOT individual API calls. Count sign-in clusters as "access sessions".
 
 See `.github/skills/mcp-usage-monitoring/SKILL.md` Queries 25-27 for detection queries.
 

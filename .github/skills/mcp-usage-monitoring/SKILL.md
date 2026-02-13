@@ -68,6 +68,7 @@ This skill monitors and audits **Model Context Protocol (MCP) server usage** acr
 7. **ALWAYS attribute activity to specific users** — never present anonymous aggregates
 8. **NEVER conflate non-MCP platform activity with MCP activity** — clearly label categories
 9. **ALWAYS check for Agent Identity (Entra Agent ID) callers** — distinguish AI agents from human users and standard SPNs (see [Agent Identity Detection](#agent-identity-detection))
+10. **ALWAYS execute pre-authored queries from [Sample KQL Queries](#sample-kql-queries) EXACTLY as written** — substitute only the time range parameter (e.g., `ago(30d)` → `ago(90d)`). These queries encode mitigations for schema pitfalls documented in [Known Pitfalls](#known-pitfalls). Writing equivalent queries from scratch is ❌ **PROHIBITED**
 
 ---
 
@@ -161,7 +162,7 @@ IF UserId is populated AND ServicePrincipalId is empty:
 | **Entra CA Optimization Agent** | Microsoft first-party agent identity | May appear in tenant sign-in logs |
 | **Custom AI agents** | Developers can register agents via Agent Identity Blueprint | Will appear as SPNs with agent subtype |
 
-> ⚠️ **Name ambiguity warning:** An SPN named with "Agent" in its display name does NOT mean it's an Agent Identity. Example: "Agent 365 Tools" is a standard `GitCreatedApp` with `servicePrincipalType: Application` and no agentic tags. Always verify via `/beta` `tags` — never rely on display name alone.
+> ⚠️ **Name ambiguity warning:** An SPN named with "Agent" in its display name does NOT mean it's an Agent Identity. Example: "Contoso Agent Tools" is a standard `GitCreatedApp` with `servicePrincipalType: Application` and no agentic tags. Always verify via `/beta` `tags` — never rely on display name alone.
 
 ### Impact on This Skill
 
@@ -181,10 +182,10 @@ When running MCP usage monitoring:
 | AppId | Service | Telemetry Table | Notes |
 |-------|---------|----------------|-------|
 | `e8c77dc2-69b3-43f4-bc51-3213c9d915b4` | Microsoft Graph MCP Server for Enterprise | `MicrosoftGraphActivityLogs` | Read-only Graph API proxy |
-| `6574a0f8-d39b-4090-abbe-6c64ec9003f0` | Sentinel Triage MCP (registered AppId) | `LAQueryLogs` (environment-dependent) | Microsoft first-party AppId, same across all tenants. **Primary detection** is via Graph Security API endpoint patterns in `MicrosoftGraphActivityLogs` (Query 7). 🔴 **Field-tested Feb 2026 (two environments):** AppId `6574a0f8` appears in `LAQueryLogs` in **some** environments (1,086 queries in production) but NOT in others (0 in lab). When present, it has **no user attribution** (empty `AADEmail`, empty `RequestClientApp`). The **bulk** of AH downstream queries appear under AppId `fc780465` / `RequestClientApp = "M365D_AdvancedHunting"` with full user attribution (162K queries). Query 7b checks both AppIds. Does NOT appear in `SigninLogs`, `MicrosoftGraphActivityLogs`, or `CloudAppEvents`. |
+| `6574a0f8-d39b-4090-abbe-6c64ec9003f0` | Sentinel Triage MCP (registered AppId) | `LAQueryLogs` (environment-dependent) | Microsoft first-party AppId, same across all tenants. **Primary detection** is via Graph Security API endpoint patterns in `MicrosoftGraphActivityLogs` (Query 7). 🔴 **Field-tested Feb 2026 (two environments):** AppId `6574a0f8` appears in `LAQueryLogs` in **some** environments (~1K queries in production) but NOT in others (0 in lab). When present, it has **no user attribution** (empty `AADEmail`, empty `RequestClientApp`). The **bulk** of AH downstream queries appear under AppId `fc780465` / `RequestClientApp = "M365D_AdvancedHunting"` with full user attribution (~160K queries). Query 7b checks both AppIds. Does NOT appear in `SigninLogs`, `MicrosoftGraphActivityLogs`, or `CloudAppEvents`. |
 | `253895df-6bd8-4eaf-b101-1381ec4306eb` | Sentinel Platform Services App Reg | `SigninLogs` | Sentinel-hosted MCP platform |
-| `1950a258-227b-4e31-a9cf-717495945fc2` | Azure MCP Server (local stdio via DefaultAzureCredential) | `SigninLogs`, `AADNonInteractiveUserSignInLogs`, `LAQueryLogs` | Shared AppId with Azure PowerShell. **Detectable** via UserAgent `azsdk-net-Identity/1.x (.NET 9.x)` in sign-in logs and `csharpsdk,LogAnalyticsPSClient` in LAQueryLogs. Read-only ARM ops don't appear in AzureActivity. |
-| *(none — uses DefaultAzureCredential)* | Azure MCP Server (local stdio) | `AzureActivity` | ARM **write** operations only; read ops not logged. Claims.appid = `1950a258`. Inherits cred from Azure CLI/VS Code |
+| `04b07795-8ddb-461a-bbee-02f9e1bf7b46` | Azure MCP Server (local stdio via DefaultAzureCredential → Azure CLI) | `SigninLogs`, `AADNonInteractiveUserSignInLogs`, `LAQueryLogs` | Shared AppId with Azure CLI. In LAQueryLogs, `RequestClientApp` is **empty** (not a unique fingerprint). Azure MCP appends `\n\| limit N` to query text — the only query-level differentiator. Read-only ARM ops don't appear in AzureActivity. 🔄 **Updated Feb 2026:** Previously documented as AppId `1950a258` (AzurePowerShellCredential) with `csharpsdk,LogAnalyticsPSClient` — that fingerprint is obsolete; only 1 occurrence found in 30-day lookback. |
+| *(none — uses DefaultAzureCredential)* | Azure MCP Server (local stdio) | `AzureActivity` | ARM **write** operations only; read ops not logged. Claims.appid = `04b07795`. Inherits cred from Azure CLI/VS Code |
 | *(no AppId — Purview unified audit)* | Sentinel Data Lake MCP | `CloudAppEvents` | RecordType 403; Interface `IMcpToolTemplate`; tools: `query_lake`, `list_sentinel_workspaces`, `search_tables` |
 
 #### Sentinel MCP Collection Endpoints
@@ -201,7 +202,7 @@ When running MCP usage monitoring:
 |-------|---------|----------------|-------|
 | `aebc6443-996d-45c2-90f0-388ff96faa56` | Visual Studio Code | `SigninLogs` | VS Code as MCP client → Sentinel |
 | `9ba5f2e4-6bbf-4df2-b19b-7f1bcb926818` | PowerPlatform-sentinelmcp-Connector | `SigninLogs` | Copilot Studio → Sentinel MCP |
-| `04b07795-ee44-4684-983e-0d77d14f7b38` | Azure CLI | `SigninLogs` | Used by Azure MCP Server when cred source is `az login` |\n| `1950a258-227b-4e31-a9cf-717495945fc2` | Microsoft Azure PowerShell (DefaultAzureCredential) | `SigninLogs`, `AADNonInteractiveUserSignInLogs`, `LAQueryLogs` | Used by Azure MCP Server when cred resolves to `AzurePowerShellCredential`. Disambiguate from actual PowerShell via UserAgent `azsdk-net-Identity` |
+| `04b07795-8ddb-461a-bbee-02f9e1bf7b46` | Azure CLI (DefaultAzureCredential) | `SigninLogs`, `AADNonInteractiveUserSignInLogs`, `LAQueryLogs` | **Primary Azure MCP Server credential path** (field-tested Feb 2026). `RequestClientApp` is empty in LAQueryLogs. Azure MCP appends `\n\| limit N` to query text. Shared AppId with manual `az` CLI — disambiguate via query text pattern or session correlation. 🔄 Previously documented as `1950a258` (AzurePowerShellCredential) — that path is obsolete |
 
 #### Portal & Platform Applications (Non-MCP — for context)
 
@@ -498,10 +499,10 @@ Business hours: **08:00–18:00 local time** (derive from user's primary sign-in
 **Filter:** `AppId == "e8c77dc2-69b3-43f4-bc51-3213c9d915b4"`
 
 Collect:
-- Daily usage summary with user count, success/error breakdown, avg duration (Query 1)
-- Top 25 Graph API endpoints accessed with call counts and last-used timestamps (Query 2)
-- Sensitive/high-risk endpoint access with user and scope details (Query 3)
-- All distinct AppIds calling Graph API for MCP discovery (Query 4)
+- **Execute Query 1** to get daily usage summary with user count, success/error breakdown, avg duration
+- **Execute Query 2** to get top 25 Graph API endpoints accessed with call counts and last-used timestamps
+- **Execute Query 3** to get sensitive/high-risk endpoint access with user and scope details
+- **Execute Query 4** to discover all distinct AppIds calling Graph API for MCP identification
 
 ### Phase 2: Sentinel Triage MCP Analysis
 
@@ -529,10 +530,10 @@ These endpoints are shared across multiple consumers. Known client AppIds and th
 | AppId | Client | Source Category |
 |-------|--------|----------------|
 | `bb3d68c2` | Security Copilot API | May include Triage MCP calls OR native Copilot operations |
-| `7b7b3966` | Custom/Third-party | May include Triage MCP calls OR custom scripts |
+| `<TenantAppId>` | Custom/Third-party | May include Triage MCP calls OR custom scripts. Replace with tenant-specific AppId. |
 | `aebc6443` | Visual Studio Code | Most likely Triage MCP (VS Code MCP extension) |
-| `98785600` | Automated poller | Likely SOAR/ticketing integration (not MCP) |
-| `9ee7b58d` | Automated poller | Likely SOAR/ticketing integration (not MCP) |
+| `<TenantAppId>` | Automated poller | Likely SOAR/ticketing integration (not MCP). Replace with tenant-specific AppId. |
+| `<TenantAppId>` | Automated poller | Likely SOAR/ticketing integration (not MCP). Replace with tenant-specific AppId. |
 | `fc780465` | Sentinel Engine | Microsoft platform automation (not MCP) |
 
 > ⚠️ **Disambiguation guidance:** Use AppId + call pattern heuristics to estimate which calls *may* originate from Triage MCP vs. other consumers. High-volume single-user polling (e.g., 40K GET calls/30d) = automated integration. Multi-user POST-heavy hunting queries = more likely interactive MCP or Copilot usage. But **definitive attribution is not possible** with current telemetry.
@@ -540,18 +541,21 @@ These endpoints are shared across multiple consumers. Known client AppIds and th
 > 🔵 **`MicrosoftGraphActivityLogs` retention** varies by environment (depends on Log Analytics workspace configuration and diagnostic settings). Do not assume a fixed retention period — check with a baseline row count query first.
 
 Collect:
-- Authentication events by client app (VS Code, Copilot Studio, browser) with user, IP, OS, country (Query 5)
-- Client app usage breakdown with distinct user counts and last-seen timestamps (Query 6)
-- Graph Security API endpoint usage from `MicrosoftGraphActivityLogs` — incident/alert/hunting calls by AppId (Query 7)
-- LAQueryLogs for Advanced Hunting downstream queries (Query 7b). Checks **two AppIds**: `fc780465` / `M365D_AdvancedHunting` (bulk of AH queries, full user attribution) and `6574a0f8` (Triage MCP direct path, environment-dependent, no user attribution). Captures queries from any `RunAdvancedHuntingQuery` consumer (Triage MCP, Defender portal, Security Copilot) that hit connected LA tables. XDR-native tables (DeviceEvents, EmailEvents) don't appear here.
-- Portal/Platform query volume from LAQueryLogs for governance context (Query 7c)
+- **Execute Query 5** to get authentication events by client app (VS Code, Copilot Studio, browser) with user, IP, OS, country
+- **Execute Query 6** to get client app usage breakdown with distinct user counts and last-seen timestamps
+- **Execute Query 7** to get Graph Security API endpoint usage from `MicrosoftGraphActivityLogs` — incident/alert/hunting calls by AppId
+- **Execute Query 7b** to get LAQueryLogs for Advanced Hunting downstream queries. Checks **two AppIds**: `fc780465` / `M365D_AdvancedHunting` (bulk of AH queries, full user attribution) and `6574a0f8` (Triage MCP direct path, environment-dependent, no user attribution). Captures queries from any `RunAdvancedHuntingQuery` consumer (Triage MCP, Defender portal, Security Copilot) that hit connected LA tables. XDR-native tables (DeviceEvents, EmailEvents) don't appear here.
+- **Execute Query 7c** to get portal/platform query volume from LAQueryLogs for governance context
 
 ### Phase 3: Sentinel Data Lake MCP Analysis
 
 **Data source:** `CloudAppEvents` (Purview unified audit log)  
-**Filter:** `ActionType contains "Sentinel"` or `ActionType contains "KQL"`, RecordType 403 (MCP tools) / 379 (Direct KQL)
+**Execution tool:** `mcp_sentinel-data_query_lake` — queries use `TimeGenerated` (Data Lake column). `CloudAppEvents` is available on both Data Lake (90d retention) and Advanced Hunting (30d, uses `Timestamp`). **Always try Data Lake first** for full retention coverage.  
+**Filter:** `ActionType contains "Sentinel"` or `ActionType contains "KQL"`. RecordType is inside `RawEventData` (not a top-level column) — extract with `parse_json(tostring(RawEventData)).RecordType`. RecordType 403 = MCP tools, 379 = Direct KQL.
 
-**Audit Path:** Sentinel Data Lake MCP tools are NOT audited via `LAQueryLogs` — they are tracked through Purview unified audit log, surfaced in the `CloudAppEvents` table. RecordType 403 = Sentinel AI Tool activities, RecordType 379 = KQL activities.
+**⚠️ MANDATORY:** Execute Query 20 against `query_lake` before reporting any gap. If the query returns 0 results or table-not-found, THEN report the gap. Do NOT skip this phase based on assumptions about E5 licensing or Purview configuration — the table may be populated even without explicit Purview setup.
+
+**Audit Path:** Sentinel Data Lake MCP tools are NOT audited via `LAQueryLogs` — they are tracked through Purview unified audit log, surfaced in the `CloudAppEvents` table. RecordType 403 (inside `RawEventData`) = Sentinel AI Tool activities, RecordType 379 = KQL activities.
 
 **MCP vs Direct KQL Delineation:**
 
@@ -574,52 +578,57 @@ Collect:
 | `InputParameters` | Full tool input including KQL query text and workspaceId | JSON string with `query` and `workspaceId` keys |
 
 Collect:
-- Data Lake MCP tool usage summary with success/failure breakdown (Query 20)
-- Tool-level breakdown with call counts and avg execution duration (Query 21)
-- Error analysis for failed Data Lake MCP tool calls (Query 22)
-- Daily activity trend across MCP and Direct KQL (Query 23)
-- MCP vs Direct KQL delineation summary (Query 24)
+- **Execute Query 20** to get Data Lake MCP tool usage summary with success/failure breakdown
+- **Execute Query 21** to get tool-level breakdown with call counts and avg execution duration
+- **Execute Query 22** to get error analysis for failed Data Lake MCP tool calls
+- **Execute Query 23** to get daily activity trend across MCP and Direct KQL
+- **Execute Query 24** to get MCP vs Direct KQL delineation summary
 
 ### Phase 4: Azure MCP Server & ARM Operations
 
 **Data sources:** `AzureActivity`, `SigninLogs`, `AADNonInteractiveUserSignInLogs`, `LAQueryLogs`  
-**Filter:** Caller = user UPN (AzureActivity), AppId = `1950a258-227b-4e31-a9cf-717495945fc2` (sign-in logs, LAQueryLogs)
+**Filter:** Caller = user UPN (AzureActivity), AppId = `04b07795-8ddb-461a-bbee-02f9e1bf7b46` (sign-in logs, LAQueryLogs)
 
 Collect:
-- ARM operations by hour/IP with operation counts and resource provider sets (Query 8)
-- Resource provider breakdown with top operations per provider (Query 9)
-- **Azure MCP Server authentication events** from SigninLogs/AADNonInteractiveUserSignInLogs — filter by AppId `1950a258` AND UserAgent containing `azsdk-net-Identity` AND `.NET` (Query 25)
-- **Azure MCP Server workspace queries** from LAQueryLogs — filter by AADClientId `1950a258` AND RequestClientApp `csharpsdk` (Query 26)
+- **Execute Query 8** to get ARM operations by hour/IP with operation counts and resource provider sets
+- **Execute Query 9** to get resource provider breakdown with top operations per provider
+- **Execute Query 25** to get **Azure MCP Server authentication events** from SigninLogs/AADNonInteractiveUserSignInLogs — filter by AppId `04b07795` (Azure CLI credential, field-tested Feb 2026). 🔄 Previously documented as AppId `1950a258` (AzurePowerShellCredential) — that path is obsolete.
+- **Execute Query 26** to get **Azure MCP Server workspace queries** from LAQueryLogs — filter by AADClientId `04b07795`. `RequestClientApp` is **empty** (not a unique fingerprint). Azure MCP appends `\n| limit N` to query text — use query text pattern as differentiator.
 
-**Detection Method (Field-Tested Feb 2026):**
+**Detection Method (🔄 Updated Feb 2026):**
 
-The Azure MCP Server runs as a local .NET process (stdio mode) and authenticates via `DefaultAzureCredential`, which resolves to `AzurePowerShellCredential` in the credential chain. This produces AppId `1950a258-227b-4e31-a9cf-717495945fc2` ("Microsoft Azure PowerShell") — the same AppId as Azure PowerShell.
+The Azure MCP Server runs as a local .NET process (stdio mode) and authenticates via `DefaultAzureCredential`. **Field-tested Feb 2026:** The credential chain now resolves to **Azure CLI credential** (`04b07795-8ddb-461a-bbee-02f9e1bf7b46`), NOT `AzurePowerShellCredential` (`1950a258`) as previously documented.
 
-**Disambiguation from Azure PowerShell AND other Azure SDK services:**
+**Previous fingerprint (OBSOLETE):** AppId `1950a258` + `RequestClientApp = csharpsdk,LogAnalyticsPSClient`. Only 1 occurrence found in 30-day lookback. The Azure MCP Server SDK path has changed.
 
-🔴 **CRITICAL (Field-Tested Feb 2026):** The `azsdk-net-Identity` UserAgent prefix is NOT unique to Azure MCP Server. It is shared by ANY Azure service using the Azure Identity SDK for .NET, including Security Copilot API (`bb3d68c2`), and potentially others. You MUST use the full composite signal to isolate Azure MCP Server:
+**Current fingerprint (field-tested Feb 2026):**
 
-| Signal | Azure MCP Server (Local) | Azure PowerShell | Security Copilot API (Cloud) | Other Azure SDK Services |
-|--------|--------------------------|------------------|------------------------------|-------------------------|
-| **AppId** | `1950a258` | `1950a258` | `bb3d68c2` | Varies |
-| **UserAgent** (SigninLogs) | `azsdk-net-Identity/1.x (.NET 9.x; **Microsoft Windows** ...)` | PowerShell-specific UA patterns | `azsdk-net-Identity/1.x (.NET 8.x; **CBL-Mariner/Linux**)` | `azsdk-net-Identity` + various OS |
-| **OS in UserAgent** | `Microsoft Windows 10.x` | `Microsoft Windows` (different UA prefix) | `CBL-Mariner/Linux` or `Microsoft Azure Linux` | Platform-dependent |
-| **RequestClientApp** (LAQueryLogs) | `csharpsdk,LogAnalyticsPSClient` | `PSClient,LogAnalyticsPSClient` | N/A | Varies |
-| **Auth pattern** | Non-interactive + occasional 700082 MFA step-up | Direct interactive or cached token | Non-interactive (server-to-server) | Varies |
-| **Resource targets** | ARM + Log Analytics API | Varies by cmdlet | Microsoft Graph, Azure Purview | Service-specific |
+| Signal | Azure MCP Server (Current) | Azure CLI (Manual) | Notes |
+|--------|---------------------------|-------------------|-------|
+| **AppId** (SigninLogs) | `04b07795` | `04b07795` | Shared — not a unique differentiator |
+| **AADClientId** (LAQueryLogs) | `04b07795` | `04b07795` | Shared |
+| **RequestClientApp** (LAQueryLogs) | **Empty** (`""`) | **Empty** (`""`) | Shared — not a unique differentiator. Empty `RequestClientApp` is also used by 4+ other AADClientIds |
+| **Query text pattern** (LAQueryLogs) | Appends `\n\| limit N` to all queries | No standard suffix | ✅ **Best differentiator** — Azure MCP `monitor_workspace_log_query` always appends a limit operator |
+| **AzureActivity** (Claims.appid) | `04b07795` (write ops only) | `04b07795` | Shared; read ops not logged |
 
-**Reliable detection filter** (use ALL conditions):
-```kql
-| where AppId == "1950a258-227b-4e31-a9cf-717495945fc2"
-| where UserAgent has "azsdk-net-Identity" and UserAgent has "Microsoft Windows"
-```
+**🚨 Key change from previous documentation:**
+- ❌ `RequestClientApp = "csharpsdk,LogAnalyticsPSClient"` — **OBSOLETE**, no longer produced by Azure MCP Server
+- ❌ AppId `1950a258` (AzurePowerShellCredential) — **OBSOLETE** credential path
+- ✅ AppId `04b07795` (Azure CLI) — current credential path
+- ✅ `RequestClientApp` is empty — shared with Azure CLI and other tools
+- ✅ Query text containing `\n| limit` — most reliable query-level differentiator
 
-**Authentication Sequence Observed:**
-1. Azure MCP Server attempts non-interactive token acquisition via `AzurePowerShellCredential`
-2. If MFA claim is missing from cached token → ResultType `700082` (MFA not completed, single-factor auth insufficient)
-3. `DefaultAzureCredential` falls back to `InteractiveBrowserCredential` → opens Edge for MFA
-4. After MFA completion, non-interactive tokens succeed with cached MFA claim
-5. Subsequent calls reuse the cached token until expiry (~1 hour)
+**Disambiguation challenges:**
+- Azure MCP Server queries are **difficult to isolate** from manual Azure CLI queries in LAQueryLogs because both share the same AppId AND empty `RequestClientApp`
+- The `\n| limit N` suffix appended by `monitor_workspace_log_query` is the best heuristic but is not guaranteed to be unique
+- In SigninLogs, UserAgent containing `azsdk-net-Identity` with OS `Microsoft Windows` may still help if the credential chain includes Azure Identity SDK components
+- Consider correlating query timing with known MCP session activity for attribution
+
+**Authentication Sequence Observed (Current):**
+1. Azure MCP Server acquires token via Azure CLI cached credential
+2. Token is reused for subsequent operations within its lifetime
+3. If MFA claim is missing → interactive browser prompt (rare with CLI credential)
+4. Subsequent calls reuse the cached token until expiry
 
 **🔴 Token Caching Behavior (Field-Tested Feb 2026):**
 - Sign-in events appear at **token acquisition time**, NOT at each individual API call time
@@ -628,9 +637,9 @@ The Azure MCP Server runs as a local .NET process (stdio mode) and authenticates
 - To count actual API calls, correlate with AzureActivity (write ops) or LAQueryLogs (`monitor_workspace_log_query` calls)
 - The ~1hr token lifetime means at most ~24 sign-in event clusters per day of continuous use
 
-**AzureActivity visibility:** Only ARM **write/action/delete** operations appear in AzureActivity (Administrative category). Azure MCP Server read-only operations (list subscriptions, list resource groups, list clusters) do NOT appear. Claims.appid = `1950a258` when write operations do occur. AzureActivity has a ~2-4 hour ingestion lag.
+**AzureActivity visibility:** Only ARM **write/action/delete** operations appear in AzureActivity (Administrative category). Azure MCP Server read-only operations (list subscriptions, list resource groups, list clusters) do NOT appear. Claims.appid = `04b07795` when write operations do occur. AzureActivity has a ~2-4 hour ingestion lag.
 
-**Note:** While the shared AppId means Azure MCP Server is not UNIQUELY identifiable by AppId alone, the composite signal (AppId + UserAgent containing `Microsoft Windows` + RequestClientApp `csharpsdk`) provides reliable detection. Present findings as "Azure MCP Server" when all signals match, or "Azure MCP Server / PowerShell (shared AppId)" if UserAgent data is unavailable.
+**Note:** Azure MCP Server is **difficult to isolate** from manual Azure CLI usage because they share the same AppId and both produce empty `RequestClientApp`. The `\n| limit N` query text suffix is the best heuristic for LAQueryLogs. In SigninLogs, the shared AppId means Azure MCP authenticated as Azure CLI — there is no unique sign-in fingerprint. Present findings as "Azure MCP Server / Azure CLI (shared AppId `04b07795`)" in reports.
 
 ### Phase 5: Workspace Query Governance
 
@@ -638,20 +647,20 @@ The Azure MCP Server runs as a local .NET process (stdio mode) and authenticates
 **Filter:** All AADClientIds (LAQueryLogs), All Sentinel operations (CloudAppEvents)
 
 Collect:
-- All clients querying the Analytics tier workspace with query counts, user counts, CPU usage (Query 10)
+- **Execute Query 10** to get all clients querying the Analytics tier workspace with query counts, user counts, CPU usage
 - Data Lake tier query volume from Phase 3 results (Queries 20-24)
 - MCP proportion calculation: combined MCP query volume (Analytics + Data Lake tiers) / total query volume
-- Non-MCP platform context (Sentinel Engine, Logic Apps, Sentinel Portal volumes)
+- **Execute Query 14** to get non-MCP platform context (Sentinel Engine, Logic Apps, Sentinel Portal volumes)
 
 ### Phase 6: Agent Identity Detection
 
 **Data sources:** `MicrosoftGraphActivityLogs`, `AADServicePrincipalSignInLogs`, `AuditLogs`, Microsoft Graph API
 
 Collect:
-- Graph MCP caller attribution — User vs SPN vs Agent breakdown (Query 17)
+- **Execute Query 17** to get Graph MCP caller attribution — User vs SPN vs Agent breakdown
 - Agent Identity inventory via Graph API — `GET /servicePrincipals?$filter=servicePrincipalType eq 'Agent'` (via Graph MCP `microsoft_graph_suggest_queries` → `microsoft_graph_get`)
-- Agent Identity sign-in events from `AADServicePrincipalSignInLogs` where applicable (Query 18)
-- Agent Identity CRUD operations from `AuditLogs` — creation, modification, deletion of agent identities (Query 19)
+- **Execute Query 18** to get Agent Identity sign-in events from `AADServicePrincipalSignInLogs` where applicable
+- **Execute Query 19** to get Agent Identity CRUD operations from `AuditLogs` — creation, modification, deletion of agent identities
 
 **Note:** This phase depends on Entra Agent ID (preview) being available in the tenant. If no agent identities exist, report: "✅ No Entra Agent Identities detected in tenant — all MCP callers are standard users or service principals." and skip Queries 18-19.
 
@@ -671,6 +680,16 @@ Collect:
 ---
 
 ## Sample KQL Queries
+
+> 🔴 **MANDATORY: Execute these queries EXACTLY as written.** Substitute only the time range parameter (e.g., `ago(30d)` → `ago(90d)`) and entity-specific values where indicated. These queries are schema-verified and encode mitigations for pitfalls documented in [Known Pitfalls](#known-pitfalls). Rewriting, paraphrasing, or constructing "equivalent" queries from scratch risks hitting the exact schema issues these queries were designed to avoid.
+
+| Action | Status |
+|--------|--------|
+| Rewriting a pre-authored query from scratch | ❌ **PROHIBITED** |
+| Removing `parse_json()` / `tostring()` wrappers from queries | ❌ **PROHIBITED** |
+| Substituting column names without schema verification | ❌ **PROHIBITED** |
+| Using `has` instead of `contains` for CamelCase fields | ❌ **PROHIBITED** |
+| Executing a query not from this section without completing the [Pre-Flight Checklist](../../copilot-instructions.md#-kql-query-execution---pre-flight-checklist) | ❌ **PROHIBITED** |
 
 ### Query 1: Graph MCP — Daily Usage Summary
 
@@ -748,6 +767,8 @@ MicrosoftGraphActivityLogs
 
 ### Query 5: Sentinel MCP — Authentication Events
 
+**⚠️ Pitfall-aware:** Uses `parse_json(Status)` and `parse_json(DeviceDetail)` wrappers — see [SigninLogs Status Field Needs parse_json()](#signinlogs-status-field-needs-parse_json-in-data-lake). Direct dot-notation fails in Data Lake.
+
 ```kql
 // Who is authenticating to Sentinel MCP (via VS Code, Copilot Studio, browser)
 SigninLogs
@@ -755,7 +776,7 @@ SigninLogs
 | where ResourceDisplayName =~ "Sentinel Platform Services"
 | project TimeGenerated, UserPrincipalName, AppDisplayName, AppId,
     ResourceDisplayName, IPAddress, 
-    tostring(Status.errorCode) as ErrorCode,
+    tostring(parse_json(Status).errorCode) as ErrorCode,
     ConditionalAccessStatus, AuthenticationRequirement, ClientAppUsed,
     tostring(parse_json(DeviceDetail).operatingSystem) as OS,
     tostring(parse_json(LocationDetails).countryOrRegion) as Country
@@ -1117,7 +1138,7 @@ MicrosoftGraphActivityLogs
    - `AgenticInstance` — runtime instance of an agent
    - `power-virtual-agents-*` — Copilot Studio internal tracking tag
 2. **Fallback:** Check `servicePrincipalType` — if it equals `"Agent"`, it is a registered Agent Identity. Note: as of Feb 2026, Copilot Studio agents still show `"Application"` here despite being true agents.
-3. **Name-based filtering is UNRELIABLE** — SPNs with "Agent" in display name may be standard app registrations (e.g., "Agent 365 Tools" = `GitCreatedApp`).
+3. **Name-based filtering is UNRELIABLE** — SPNs with "Agent" in display name may be standard app registrations (e.g., "Contoso Agent Tools" = `GitCreatedApp`).
 
 Use `microsoft_graph_suggest_queries` → `microsoft_graph_get` for the Graph API calls. Query multiple SPNs in one call: `/beta/servicePrincipals?$count=true&$filter=id in ('id1','id2')&$select=id,appId,displayName,servicePrincipalType,tags`.
 
@@ -1193,6 +1214,8 @@ AuditLogs
 
 ### Query 20: Data Lake MCP — Tool Usage Summary
 
+**⚠️ Pitfall-aware:** Uses `contains` (not `has`) for ActionType/Operation — see [CloudAppEvents CamelCase Matching](#cloudappevents-camelcase-matching-actiontype-and-operation). Uses `parse_json(tostring(RawEventData))` — see [CloudAppEvents RawEventData Parsing](#cloudappevents-raweventsdata-parsing). Filters on `SentinelAIToolRunCompleted` only — see [CloudAppEvents Double-Counting Prevention](#cloudappevents-double-counting-prevention).
+
 ```kql
 // Sentinel Data Lake MCP tool usage from CloudAppEvents (Purview unified audit)
 // RecordType 403 = Sentinel AI Tool activities (MCP), RecordType 379 = KQL activities (direct)
@@ -1236,6 +1259,8 @@ CloudAppEvents
 
 ### Query 21: Data Lake MCP — Tool Breakdown
 
+**⚠️ Pitfall-aware:** Uses `contains`/`parse_json(tostring())` pattern — see Query 20 pitfall notes. Uses `todouble(ExecutionDuration)` — see [Data Lake MCP ExecutionDuration Format](#data-lake-mcp-executionduration-format).
+
 ```kql
 // Breakdown of individual MCP tool usage from CloudAppEvents
 // Shows which Data Lake MCP tools are being called most frequently
@@ -1266,6 +1291,8 @@ CloudAppEvents
 ```
 
 ### Query 22: Data Lake MCP — Error Analysis
+
+**⚠️ Pitfall-aware:** Uses `contains`/`parse_json(tostring())` pattern — see Query 20 pitfall notes.
 
 ```kql
 // Analyze failed Data Lake MCP tool calls — identify schema errors, permission issues, etc.
@@ -1301,6 +1328,8 @@ CloudAppEvents
 ```
 
 ### Query 23: Data Lake MCP — Daily Activity Trend
+
+**⚠️ Pitfall-aware:** Uses `contains`/`parse_json(tostring())` pattern — see Query 20 pitfall notes.
 
 ```kql
 // Daily activity trend for Data Lake MCP tools and Direct KQL
@@ -1391,33 +1420,36 @@ CloudAppEvents
 | **Analytics Tier** | `LAQueryLogs` | AH backend `fc780465` / `M365D_AdvancedHunting` + Triage MCP direct `6574a0f8` *(supplementary — captures AH queries from Triage MCP, Defender portal, Security Copilot that hit connected LA tables; dual-AppId, see Query 7b)* | Sentinel Portal (`80ccca67`), Sentinel Engine analytics (`fc780465`, non-AH), Logic Apps (`de8c33bb`) |
 | **Data Lake Tier** | `CloudAppEvents` | Data Lake MCP (RecordType 403, `IMcpToolTemplate`) | Direct KQL (RecordType 379, `KqsService`) |
 | **Graph API** | `MicrosoftGraphActivityLogs` | Graph MCP (`e8c77dc2`) | — |
-| **Azure MCP** | `SigninLogs`, `AADNonInteractiveUserSignInLogs`, `LAQueryLogs` | Azure MCP Server (`1950a258` + UA `azsdk-net-Identity`) | Azure PowerShell (same AppId, different UA) |
+| **Azure MCP** | `SigninLogs`, `AADNonInteractiveUserSignInLogs`, `LAQueryLogs` | Azure MCP Server (`04b07795`, empty `RequestClientApp`, query text `\n| limit N` suffix) | Azure CLI (same AppId, same empty `RequestClientApp`) |
 
 ### Query 25: Azure MCP Server — Authentication Events (SigninLogs)
 
+**⚠️ Pitfall-aware:** Uses `parse_json(Status)`/`parse_json(DeviceDetail)` wrappers — see [SigninLogs Status Field Needs parse_json()](#signinlogs-status-field-needs-parse_json-in-data-lake). Uses `extend SignInType` to avoid `Type` pseudo-column — see [Type Column Unavailable in Data Lake Union Contexts](#type-column-unavailable-in-data-lake-union-contexts).
+
 ```kql
-// Detect Azure MCP Server authentication events by FULL composite signal:
-// AppId 1950a258 (shared with Azure PowerShell) + UserAgent 'azsdk-net-Identity' + OS 'Microsoft Windows'
+// Detect Azure MCP Server authentication events via Azure CLI AppId.
 //
-// 🔴 CRITICAL: 'azsdk-net-Identity' alone is NOT sufficient! This UserAgent prefix is shared by:
-//   - Azure MCP Server (local, .NET 9.x, Microsoft Windows)
-//   - Security Copilot API (AppId bb3d68c2, .NET 8.x, CBL-Mariner/Linux)
-//   - Other Azure SDK services running on various platforms
-// The 'Microsoft Windows' OS filter isolates local Azure MCP Server from cloud-hosted services.
+// 🔄 UPDATED Feb 2026: Azure MCP Server now uses Azure CLI credential (04b07795),
+// NOT AzurePowerShellCredential (1950a258) as previously documented.
+// The old AppId 1950a258 + UserAgent 'azsdk-net-Identity' fingerprint is OBSOLETE.
+//
+// ⚠️ SHARED APPID: 04b07795 is the Azure CLI AppId — shared with manual 'az' CLI usage.
+// There is NO unique sign-in fingerprint for Azure MCP Server vs manual Azure CLI.
+// This query returns ALL Azure CLI sign-ins. Correlate with LAQueryLogs (Query 26)
+// for query-level attribution via the '\n| limit N' text pattern.
 //
 // NOTE: Sign-in events represent TOKEN ACQUISITIONS, not individual API calls.
-// A cached token (~1hr) serves many Azure MCP calls with no additional sign-in events.
+// A cached token serves many Azure MCP calls with no additional sign-in events.
 // FIX (Feb 2026): Explicit tostring() casts on ResultType, ResultDescription,
 // ConditionalAccessStatus, AuthenticationRequirement to prevent union type mismatches
 // between SigninLogs and AADNonInteractiveUserSignInLogs. Removed ResourceId (inconsistent
 // across tables). Use parse_json() wrapper on DeviceDetail and LocationDetails — these
 // columns may be stored as string (not dynamic) in Data Lake workspaces, causing
 // SemanticError on dot-notation access without parse_json().
-let azure_mcp_appid = "1950a258-227b-4e31-a9cf-717495945fc2";
+let azure_mcp_appid = "04b07795-8ddb-461a-bbee-02f9e1bf7b46";
 let signinlogs_interactive = SigninLogs
 | where TimeGenerated >= ago(90d)
 | where AppId == azure_mcp_appid
-| where UserAgent has "azsdk-net-Identity" and UserAgent has "Microsoft Windows"
 | extend SignInType = "Interactive"
 | project TimeGenerated, UserPrincipalName, AppDisplayName, AppId,
     ResourceDisplayName, IPAddress, 
@@ -1431,7 +1463,6 @@ let signinlogs_interactive = SigninLogs
 let signinlogs_noninteractive = AADNonInteractiveUserSignInLogs
 | where TimeGenerated >= ago(90d)
 | where AppId == azure_mcp_appid
-| where UserAgent has "azsdk-net-Identity" and UserAgent has "Microsoft Windows"
 | extend SignInType = "Non-Interactive"
 | project TimeGenerated, UserPrincipalName, AppDisplayName, AppId,
     ResourceDisplayName, IPAddress,
@@ -1449,36 +1480,53 @@ union signinlogs_interactive, signinlogs_noninteractive
 ### Query 26: Azure MCP Server — Workspace Queries (LAQueryLogs)
 
 ```kql
-// Detect Azure MCP Server workspace queries via LAQueryLogs
-// Azure MCP Server uses RequestClientApp = 'csharpsdk,LogAnalyticsPSClient'
-// while Azure PowerShell uses 'PSClient,LogAnalyticsPSClient'
-// FIX (Feb 2026): Removed StatsDataProcessedKB — column does not exist in LAQueryLogs.
-// Use StatsCPUTimeMs and ResponseRowCount for performance context.
-let azure_mcp_appid = "1950a258-227b-4e31-a9cf-717495945fc2";
+// Detect Azure MCP Server workspace queries via LAQueryLogs.
+//
+// 🔄 UPDATED Feb 2026: Azure MCP Server now uses Azure CLI credential (04b07795).
+// RequestClientApp is EMPTY (not 'csharpsdk,LogAnalyticsPSClient' as previously documented).
+//
+// ⚠️ SHARED FINGERPRINT: Empty RequestClientApp + AppId 04b07795 is shared with manual
+// Azure CLI and 4+ other AADClientIds. This query returns ALL queries from AppId 04b07795
+// with empty RequestClientApp. To isolate Azure MCP Server queries, look for the
+// '\n| limit N' suffix that monitor_workspace_log_query always appends to query text.
+//
+// 30-day pattern analysis (Feb 2026) showed 11 distinct RequestClientApp values:
+//   - Empty ("") = 417 queries across 5 AADClientIds (Azure MCP, Sentinel DL MCP, Portal, etc.)
+//   - "csharpsdk,LogAnalyticsPSClient" = only 1 query ever (obsolete fingerprint)
+//   - "M365D_AdvancedHunting" = Advanced Hunting backend
+//   - "ASI_Portal" / "ASI_Portal_Connectors" = Sentinel Portal
+//   - Others: AppInsightsPortalExtension, LogicApps, PSClient, etc.
+let azure_cli_appid = "04b07795-8ddb-461a-bbee-02f9e1bf7b46";
 LAQueryLogs
 | where TimeGenerated >= ago(90d)
-| where AADClientId == azure_mcp_appid
-| where RequestClientApp has "csharpsdk"  // Distinguishes from PowerShell's 'PSClient'
+| where AADClientId == azure_cli_appid
+| extend HasLimitSuffix = QueryText has "\n| limit" or QueryText has "\r\n| limit"
 | project TimeGenerated, AADEmail, AADClientId,
     RequestClientApp,
     QueryTextTruncated = substring(QueryText, 0, 300),
     ResponseCode, ResponseRowCount,
     StatsCPUTimeMs,
-    RequestTarget
+    RequestTarget,
+    HasLimitSuffix
 | order by TimeGenerated desc
 ```
 
+> **Post-processing:** Rows with `HasLimitSuffix = true` are highly likely Azure MCP Server queries (the `monitor_workspace_log_query` command always appends `| limit N`). Rows without the suffix may be manual Azure CLI or other tools using the same credential.
+
 ### Query 27: Azure MCP Server — AzureActivity Claims Correlation
+
+**⚠️ Pitfall-aware:** Uses `parse_json(Claims)` to extract `appid` — AzureActivity Claims is a JSON string. Only ARM write/action/delete operations appear (reads not logged). See [Azure MCP Server Detection](#azure-mcp-server-detection--updated-feb-2026).
 
 ```kql
 // Check AzureActivity for Azure MCP Server write operations (read ops not logged)
 // Parse Claims.appid to identify the source application
+// 🔄 UPDATED Feb 2026: Now uses Azure CLI AppId 04b07795 (previously 1950a258)
 AzureActivity
 | where TimeGenerated >= ago(90d)
 | where CategoryValue == "Administrative"
 | extend ClaimsData = parse_json(Claims)
 | extend ClaimsAppId = tostring(ClaimsData.appid)
-| where ClaimsAppId == "1950a258-227b-4e31-a9cf-717495945fc2"
+| where ClaimsAppId == "04b07795-8ddb-461a-bbee-02f9e1bf7b46"
 | project TimeGenerated, Caller, CallerIpAddress,
     OperationNameValue, ResourceProviderValue,
     ActivityStatusValue, ClaimsAppId,
@@ -1512,8 +1560,8 @@ The inline report MUST include these sections in order:
    - Daily activity trend (ASCII bar chart)
    - MCP vs Direct KQL delineation table
 6. **Azure MCP & ARM Analysis**
-   - Azure MCP Server authentication events (detected via AppId `1950a258` + UserAgent `azsdk-net-Identity`)
-   - Azure MCP Server workspace queries from LAQueryLogs (detected via `csharpsdk,LogAnalyticsPSClient`)
+   - Azure MCP Server authentication events (detected via AppId `04b07795` — Azure CLI credential, shared AppId)
+   - Azure MCP Server workspace queries from LAQueryLogs (detected via AADClientId `04b07795` + empty `RequestClientApp` + `\n| limit N` query text suffix)
    - ARM operation volume and resource providers accessed
    - Source attribution via Claims.appid (Azure Portal, AI Studio, Power Platform connectors, etc.)
 7. **Workspace Query Governance (Two-Tier)**
@@ -1677,7 +1725,7 @@ When outputting to markdown file, include everything from the inline format PLUS
 
 ## Azure MCP Server
 
-> **Detection Method:** Composite signal analysis — AppId `1950a258` + UserAgent `azsdk-net-Identity (.NET 9.x)` in SigninLogs + `csharpsdk,LogAnalyticsPSClient` in LAQueryLogs.
+> **Detection Method:** Azure CLI credential (AppId `04b07795`, shared with manual `az` CLI). `RequestClientApp` is empty in LAQueryLogs. Best differentiator: Azure MCP appends `\\n| limit N` to query text via `monitor_workspace_log_query`. 🔄 Previously documented as AppId `1950a258` + `csharpsdk,LogAnalyticsPSClient` — that fingerprint is obsolete.
 
 ### Authentication Timeline
 | Timestamp | Resource | Result | Auth Type | UserAgent | Notes |
@@ -1689,7 +1737,7 @@ When outputting to markdown file, include everything from the inline format PLUS
 
 ### AzureActivity Write Operations
 | Timestamp | Operation | Resource Provider | Status | Claims.appid |
-|-----------|-----------|-------------------|--------|-------------|\n| ... | ... | ... | ... | `1950a258` |
+|-----------|-----------|-------------------|--------|-------------|\n| ... | ... | ... | ... | `04b07795` |
 
 ---
 
@@ -1865,40 +1913,39 @@ For full query definitions, deployment checklist, and companion analytics rule t
 **Solution (Field-Tested):** Use the **`/beta` `tags` property** as the primary detection method. Query: `GET /beta/servicePrincipals/{id}?$select=id,appId,displayName,servicePrincipalType,tags`. Confirmed Copilot Studio agents will have tags including `AgenticApp`, `AIAgentBuilder`, `AgentCreatedBy:CopilotStudio`, and `AgenticInstance`. Standard app registrations (even those with "Agent" in the display name) will NOT have these tags — they may have tags like `GitCreatedApp` or `disableLegacyUserImpersonation*` instead. For `UserId` values, check against the tenant's agent user inventory. If no Agent Identities exist in the tenant, note this and skip agent-specific analysis.
 
 ### Agent Display Name Unreliable for Classification
-**Problem:** An SPN with "Agent" in its display name is NOT necessarily an Agent Identity. Example from live testing: "Agent 365 Tools" is a standard app registration (`servicePrincipalType: Application`, tags: `GitCreatedApp`) — NOT a Copilot Studio agent despite the name. Conversely, a generic name like "Agent (Microsoft Copilot Studio)" IS a real agent.  
+**Problem:** An SPN with "Agent" in its display name is NOT necessarily an Agent Identity. Example from live testing: "Contoso Agent Tools" is a standard app registration (`servicePrincipalType: Application`, tags: `GitCreatedApp`) — NOT a Copilot Studio agent despite the name. Conversely, a generic name like "Agent (Microsoft Copilot Studio)" IS a real agent.  
 **Solution:** NEVER classify SPNs as agents based on display name alone. Always check the `/beta` `tags` array for agentic indicators (`AgenticApp`, `AgentCreatedBy:CopilotStudio`). In AuditLogs, check `InitiatedBy` — agents created by `Power Virtual Agents Service` are Copilot Studio agents, while those created by a `user@domain.com` are manual app registrations.
 
-### Azure MCP Server Detection (Updated Feb 2026)
-**Problem:** Azure MCP Server uses `DefaultAzureCredential` and shares AppId `1950a258-227b-4e31-a9cf-717495945fc2` with Azure PowerShell. Additionally, the `azsdk-net-Identity` UserAgent prefix is shared with OTHER Azure SDK services (e.g., Security Copilot API `bb3d68c2`). ARM read operations (the majority of MCP calls) do not appear in `AzureActivity`.  
-**Solution (Field-Tested):** Azure MCP Server IS detectable through composite signal analysis. The FULL composite signal is required — no single field is sufficient:
+### Azure MCP Server Detection (🔄 Updated Feb 2026)
+**Problem:** Azure MCP Server uses `DefaultAzureCredential` and the credential chain now resolves to **Azure CLI** (AppId `04b07795-8ddb-461a-bbee-02f9e1bf7b46`), NOT `AzurePowerShellCredential` (`1950a258`) as previously documented. In LAQueryLogs, `RequestClientApp` is **empty** (not `csharpsdk,LogAnalyticsPSClient`). The previously documented fingerprint (`1950a258` + `csharpsdk,LogAnalyticsPSClient`) appeared only once in 30-day lookback and is obsolete. ARM read operations (the majority of MCP calls) do not appear in `AzureActivity`.
 
-| Signal Source | Detection Fields | Azure MCP Server Fingerprint | False Positives to Exclude |
-|---------------|-----------------|------------------------------|---------------------------|
-| **SigninLogs / AADNonInteractiveUserSignInLogs** | AppId + UserAgent (incl. OS) | AppId `1950a258` + UA `azsdk-net-Identity` + OS `Microsoft Windows` | Security Copilot API (`bb3d68c2`, OS `CBL-Mariner/Linux`), other cloud-hosted Azure SDK services |
-| **LAQueryLogs** | AADClientId + RequestClientApp | `1950a258` + `csharpsdk,LogAnalyticsPSClient` | Azure PowerShell uses `PSClient,LogAnalyticsPSClient` |
-| **AzureActivity** | Claims.appid | `1950a258` (write operations only — reads not logged) | Azure PowerShell write ops share same Claims.appid |
+**Previous fingerprint (OBSOLETE):**
+- ❌ AppId `1950a258-227b-4e31-a9cf-717495945fc2` (AzurePowerShellCredential)
+- ❌ `RequestClientApp = "csharpsdk,LogAnalyticsPSClient"` in LAQueryLogs
+- ❌ UserAgent `azsdk-net-Identity` as primary differentiator (shared by many Azure SDK services)
 
-**Key disambiguation:** Three entities share the `azsdk-net-Identity` UserAgent pattern:
-1. **Azure MCP Server** — AppId `1950a258`, OS `Microsoft Windows`, `.NET 9.x` (local desktop process)
-2. **Azure PowerShell** — AppId `1950a258`, different UA prefix (no `azsdk-net-Identity`)
-3. **Cloud services** (Security Copilot API, etc.) — Different AppIds (`bb3d68c2`), OS `CBL-Mariner/Linux` or `Microsoft Azure Linux`
+**Current fingerprint (field-tested Feb 2026):**
+- ✅ AppId `04b07795-8ddb-461a-bbee-02f9e1bf7b46` (Azure CLI)
+- ✅ `RequestClientApp` is **empty** (shared with Azure CLI and 4+ other AADClientIds — not a unique fingerprint)
+- ✅ Azure MCP `monitor_workspace_log_query` appends `\n| limit N` to query text — **best query-level differentiator**
+- ✅ Token caching: sign-in events represent access sessions, not individual API calls
 
-**Token caching behavior:** Sign-in events appear at token acquisition time, NOT per API call. A cached token (~1hr lifetime) serves multiple Azure MCP calls with no additional sign-in events. This means sign-in event counts represent ACCESS SESSIONS, not individual tool invocations.
+**Solution:** Azure MCP Server queries can be identified in LAQueryLogs with moderate confidence by filtering for AADClientId `04b07795` + query text containing `\n| limit` (the suffix added by `monitor_workspace_log_query`). In SigninLogs, the shared AppId means Azure MCP is indistinguishable from manual Azure CLI usage — present as "Azure MCP Server / Azure CLI (shared AppId `04b07795`)" in reports. The empty `RequestClientApp` bucket contains queries from 5+ different tools, so this field cannot be used for attribution.
 
 **Limitations:**
-- ARM read operations (list subscriptions, list resource groups, list clusters) produce sign-in events but NOT AzureActivity records
-- If the user also runs actual Azure PowerShell with the same account, their sign-in events will share the same AppId — filter by UserAgent containing BOTH `azsdk-net-Identity` AND `Microsoft Windows` to disambiguate
-- When Azure MCP Server is deployed in remote HTTP mode (e.g., Azure Container Apps), a dedicated Entra app registration provides a unique AppId — check if one is configured
-- The `DefaultAzureCredential` chain may resolve to different credential types depending on environment (Azure CLI, VS Code, managed identity), but the .NET runtime UserAgent is always present
-- AzureActivity has a ~2-4 hour ingestion lag; SigninLogs has ~1-2 hour lag; LAQueryLogs and AADNonInteractiveUserSignInLogs are near-real-time (~5-15 min)
+- ARM read operations produce sign-in events but NOT AzureActivity records
+- If the user also runs `az` CLI manually, sign-in events from both are indistinguishable
+- The `\n| limit N` query text suffix is the only reliable query-level differentiator but is heuristic
+- The credential chain may change with Azure MCP Server updates — monitor for AppId shifts
+- AzureActivity has ~2-4h ingestion lag; SigninLogs ~1-2h; LAQueryLogs/AADNonInteractiveUserSignInLogs ~5-15 min
 
 ### Triage MCP AppId in LAQueryLogs — Dual-AppId Behavior (Field-Tested Feb 2026)
 **Problem:** AppId `6574a0f8-d39b-4090-abbe-6c64ec9003f0` (Sentinel Triage MCP) was originally expected to appear in `LAQueryLogs` as the primary downstream signal for Advanced Hunting queries. Cross-environment testing revealed inconsistent and dual-AppId behavior:  
 
 | Environment | `6574a0f8` (Triage MCP) | `fc780465` / `M365D_AdvancedHunting` |
 |-------------|------------------------|-------------------------------------|
-| **Production** | ✅ 1,086 queries (30d) — but **no user attribution** (empty `AADEmail`, empty `RequestClientApp`) | ✅ 162,642 queries (30d) — full user attribution, 4 distinct users |
-| **Lab (CyberSOC)** | ❌ 0 queries (30d) | ✅ 439 queries (4h window) — full user attribution |
+| **Production** | ✅ ~1K queries (30d) — but **no user attribution** (empty `AADEmail`, empty `RequestClientApp`) | ✅ ~160K queries (30d) — full user attribution, multiple distinct users |
+| **Lab** | ❌ 0 queries (30d) | ✅ ~400 queries (4h window) — full user attribution |
 
 **Root Cause:** Two execution paths exist for AH queries hitting connected LA tables:
 1. **Primary path** (`fc780465` / `M365D_AdvancedHunting`): The Advanced Hunting execution backend processes the query and logs it under its own identity. Carries ~99% of volume with full user attribution.
@@ -1946,7 +1993,9 @@ For full query definitions, deployment checklist, and companion analytics rule t
 
 ### Data Lake MCP Has No AppId
 **Problem:** Unlike Graph MCP (`e8c77dc2`) and Sentinel Triage MCP (`6574a0f8`), the Sentinel Data Lake MCP has **no dedicated AppId** in any telemetry table. It is not visible in `LAQueryLogs`, `SigninLogs`, or `MicrosoftGraphActivityLogs`.  
-**Solution:** Data Lake MCP activity is audited exclusively via `CloudAppEvents` (Purview unified audit log). Filter by `RecordType == 403` and `Interface == "IMcpToolTemplate"`. If `CloudAppEvents` is not available (no E5 license or Purview not configured), Data Lake MCP monitoring is impossible — report this gap explicitly.
+**Solution:** Data Lake MCP activity is audited exclusively via `CloudAppEvents` (Purview unified audit log). Filter by `ActionType contains "SentinelAITool"` (preferred — top-level column) or extract `RecordType` from `RawEventData` with `toint(parse_json(tostring(RawEventData)).RecordType) == 403` and `Interface == "IMcpToolTemplate"`. Note: `RecordType` is NOT a top-level column in `CloudAppEvents` — it is nested inside `RawEventData` and must be extracted via `parse_json()`.
+
+**Table availability (field-tested Feb 2026):** `CloudAppEvents` was confirmed available on **both** Data Lake (`TimeGenerated`, 90d retention) and Advanced Hunting (`Timestamp`, 30d retention) in a standard Sentinel workspace without explicit Purview/E5 configuration. **Always attempt the query first** — only report a gap if the table returns 0 results or a table-not-found error. Do not skip Phase 3 based on licensing assumptions.
 
 ### CloudAppEvents Double-Counting Prevention
 **Problem:** Each Data Lake MCP tool call generates TWO events: `SentinelAIToolRunStarted` (RecordType 403) and `SentinelAIToolRunCompleted` (RecordType 403). Counting both will double the actual call count.  
@@ -1959,6 +2008,14 @@ For full query definitions, deployment checklist, and companion analytics rule t
 ### Sentinel Engine False Association
 **Problem:** The Sentinel analytics engine (`fc780465-2017-40d4-a0c5-307022471b92`) generates the highest query volume in most workspaces but is NOT an MCP server. Including it in MCP totals would massively inflate the numbers.  
 **Solution:** ALWAYS label Sentinel Engine and Logic Apps Connector as "Platform (Non-MCP)" in reports. The MCP proportion calculation MUST exclude these from the MCP numerator.
+
+### SigninLogs `Status` Field Needs `parse_json()` in Data Lake
+**Problem:** The `Status` column in `SigninLogs` / `AADNonInteractiveUserSignInLogs` is a dynamic field containing `{errorCode, failureReason, additionalDetails}`, but Data Lake workspaces may store it as a **string**. Using dot-notation (`Status.errorCode`) without `parse_json()` causes parser errors (`Expected: ;`) or SemanticErrors.  
+**Solution:** Always use `tostring(parse_json(Status).errorCode)` — same pattern as `DeviceDetail`, `LocationDetails`, and `ConditionalAccessPolicies`. This works regardless of whether the column is stored as dynamic or string. Query 5 was fixed for this in Feb 2026.
+
+### `Type` Column Unavailable in Data Lake Union Contexts
+**Problem:** The `Type` pseudo-column (table name) is **NOT resolvable** in `union` queries executed via Sentinel Data Lake. Using `summarize by Type` in a `union SigninLogs, AADNonInteractiveUserSignInLogs` query fails with `SemanticError: Failed to resolve scalar expression named 'Type'`.  
+**Solution:** When you need to distinguish source tables in a union, add `| extend TableName = "SigninLogs"` (or `"AADNonInteractive"`) within each union leg before the union operator. Then `summarize by TableName`. This is already handled in Query 25 via the `SignInType` field pattern (`extend SignInType = "Interactive"` / `"Non-Interactive"`), but ad-hoc summary variants must use the `extend` approach — never `Type`.
 
 ### Non-Interactive Sign-In Noise
 **Problem:** `AADNonInteractiveUserSignInLogs` may contain Logic Apps connector activity (`de8c33bb`) that looks like user activity but is automated.  
@@ -2010,7 +2067,7 @@ For full query definitions, deployment checklist, and companion analytics rule t
 | Query timeout | Reduce lookback from 30d to 7d, or add `| take 100` to intermediate results. |
 | Unknown AppId in LAQueryLogs | Cross-reference with Entra ID > App Registrations. May be a custom MCP server or third-party tool. |
 | Multiple workspaces available | Follow workspace selection rules — STOP, list all, ASK user, WAIT. |
-| Azure MCP calls indistinguishable from CLI | Partially resolved: AppId `1950a258` + UserAgent `azsdk-net-Identity (.NET 9.x)` reliably distinguishes Azure MCP Server from Azure PowerShell in SigninLogs. ARM read ops still don't appear in AzureActivity. |
+| Azure MCP calls indistinguishable from CLI | Partially resolved: AppId `04b07795` is shared with Azure CLI. Use `\n| limit N` query text pattern in LAQueryLogs as best differentiator. Present as "Azure MCP / Azure CLI (shared AppId)" in reports. |
 
 ### Validation Checklist
 
@@ -2029,7 +2086,7 @@ Before presenting results, verify:
 - [ ] CloudAppEvents RawEventData is parsed with `parse_json(tostring(RawEventData))` pattern
 - [ ] Data Lake MCP tool call counts use `SentinelAIToolRunCompleted` only (not Started) to avoid double-counting
 - [ ] All user attribution is based on actual query results, not assumptions
-- [ ] Azure MCP Server data includes detection via composite signal (AppId `1950a258` + UserAgent `azsdk-net-Identity` + RequestClientApp `csharpsdk`)
+- [ ] Azure MCP Server detection uses AppId `04b07795` (Azure CLI) with empty `RequestClientApp` and query text `\n| limit N` suffix as differentiator. Present as "Azure MCP Server / Azure CLI (shared AppId)" in reports
 - [ ] Graph MCP sensitive endpoint percentage is calculated from actual data
 - [ ] Off-hours analysis states the timezone assumption (default: UTC)
 - [ ] Empty results are explicitly reported with ✅ (not silently omitted)
