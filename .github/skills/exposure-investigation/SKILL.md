@@ -27,6 +27,7 @@ This skill generates a comprehensive **Vulnerability & Exposure Management Repor
 | Attack Paths | `ExposureGraphEdges` + `ExposureGraphNodes` | Multi-hop paths from vulnerable to critical assets |
 | Defender Device Health | `DeviceTvmSecureConfigurationAssessment` + `DeviceInfo` | AV mode, signatures, RTP, tamper protection, cloud protection compliance by active/inactive status |
 | Certificate Status | `DeviceTvmCertificateInfo` | Expired and expiring certificates |
+| Software Evidence (drill-down) | `DeviceTvmSoftwareEvidenceBeta` | File paths, registry paths linking vulnerable software to on-disk locations — used for targeted remediation |
 
 ---
 
@@ -36,11 +37,12 @@ This skill generates a comprehensive **Vulnerability & Exposure Management Repor
 2. **[Output Modes](#output-modes)** - Inline chat vs. Markdown file
 3. **[Quick Start](#quick-start-tldr)** - 8-step execution pattern
 4. **[Execution Workflow](#execution-workflow)** - Complete phased process
-5. **[Sample KQL Queries](#sample-kql-queries)** - Validated query patterns (Queries 1-11, 13-15)
-6. **[Report Template](#report-template)** - Output structure and formatting
-7. **[Per-Device Mode](#per-device-mode)** - Single device scoping
-8. **[Known Pitfalls](#known-pitfalls)** - Edge cases
-9. **[Error Handling](#error-handling)** - Troubleshooting guide
+5. **[Sample KQL Queries](#sample-kql-queries)** - Validated query patterns (Queries 1-11, 13-16)
+6. **[Drill-Down Reference Queries](#drill-down-reference-queries)** - Targeted file-level evidence for remediation (Queries 17-19)
+7. **[Report Template](#report-template)** - Output structure and formatting
+8. **[Per-Device Mode](#per-device-mode)** - Single device scoping
+9. **[Known Pitfalls](#known-pitfalls)** - Edge cases
+10. **[Error Handling](#error-handling)** - Troubleshooting guide
 
 ---
 
@@ -686,6 +688,171 @@ ExposureGraphEdges
 
 ---
 
+## Drill-Down Reference Queries
+
+> **⚠️ These queries are NOT part of the standard report workflow.** They use `DeviceTvmSoftwareEvidenceBeta` to map vulnerable software to actual file paths on disk. Use them for **targeted drill-downs** when the user asks to investigate a specific software's vulnerabilities, identify cleanup targets, or understand why a software has so many CVE versions.
+>
+> **Do NOT run these fleet-wide in large environments** — the evidence table can be very large. Always scope to a specific `SoftwareName` and optionally a `DeviceId`.
+
+### When to Use
+
+| Scenario | Query | Trigger |
+|----------|-------|---------|
+| User asks "why does software X have so many versions?" | Q17 | After Q14 reveals high version sprawl |
+| User asks "what files are causing these CVEs?" | Q18 | After Q2 identifies exploitable CVEs for a software |
+| User asks "what can I safely clean up?" | Q19 | After Q17/Q18 reveal old extension/app version folders |
+| Standard vulnerability report | None | These queries are NOT used in standard reports |
+
+### DeviceTvmSoftwareEvidenceBeta — Table Reference
+
+> **Beta table:** Schema and table name may change in future Defender releases. The canonical table name is `DeviceTvmSoftwareEvidenceBeta` — NOT `DeviceTvmSoftwareEvidences` or `DeviceTvmSoftwareEvidence`.
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `DeviceId` | string | Device identifier (join with `DeviceInfo` for `DeviceName`) |
+| `SoftwareVendor` | string | Software vendor name |
+| `SoftwareName` | string | Software product name (matches `DeviceTvmSoftwareVulnerabilities.SoftwareName`) |
+| `SoftwareVersion` | string | Detected version (matches `DeviceTvmSoftwareVulnerabilities.SoftwareVersion`) |
+| `DiskPaths` | dynamic | JSON array of file paths where the software was detected on disk |
+| `RegistryPaths` | dynamic | JSON array of registry keys evidencing the software installation |
+| `LastSeenTime` | string | Last time evidence was observed |
+
+---
+
+### Query 17: Version Sprawl by Source — Per-Software Summary
+
+```kql
+// Drill-down: For a specific software, show all versions with file locations
+// categorized by source (Azure extension, application, standalone install, etc.)
+// Scope: Single software — ALWAYS filter by SoftwareName
+DeviceTvmSoftwareEvidenceBeta
+| where SoftwareName =~ '<SOFTWARE_NAME>'
+| extend Paths = parse_json(DiskPaths)
+| mv-expand Path = Paths
+| extend FilePath = tostring(Path)
+| extend Source = case(
+    FilePath has "Packages\\Plugins", "Azure Extension",
+    FilePath has "Program Files\\Microsoft OneDrive", "OneDrive",
+    FilePath has "WindowsApps", "Store App",
+    FilePath has "Program Files\\dotnet", ".NET Runtime",
+    FilePath has "Python", "Python",
+    FilePath has "Windows\\System32", "System",
+    FilePath has "Program Files\\", "Installed Software",
+    FilePath has "dpkg-query", "Linux Package",
+    "Other")
+| join kind=inner (
+    DeviceInfo | summarize arg_max(Timestamp, DeviceName) by DeviceId
+) on DeviceId
+| summarize 
+    Versions = make_set(SoftwareVersion),
+    FileCount = dcount(FilePath),
+    Devices = make_set(DeviceName)
+    by Source
+| extend VersionCount = array_length(Versions), DeviceCount = array_length(Devices)
+| order by FileCount desc
+```
+
+**Purpose:** High-level summary showing WHERE a software's vulnerable files come from — Azure extensions leaving old versions behind, OneDrive version-per-folder sprawl, Store apps, standalone installs, etc. Useful for identifying the root cause of version sprawl and choosing the right remediation approach.
+
+**Substitute:** Replace `<SOFTWARE_NAME>` with the software from Q14 results (e.g., `openssl`, `curl`, `zlib`).
+
+**When to include in reports:** This query produces a compact summary table suitable for including in reports when a specific software dominates the CVE count. Present it under Section 2c (Top Vulnerable Software) as a "Source Breakdown" sub-table for the worst offender.
+
+---
+
+### Query 18: Vulnerable File Paths — CVE to File Mapping
+
+```kql
+// Drill-down: Map specific software versions to their on-disk file paths
+// and correlate with CVE count per version
+// Scope: Single software — ALWAYS filter by SoftwareName
+let vulnVersions = DeviceTvmSoftwareVulnerabilities
+| where SoftwareName =~ '<SOFTWARE_NAME>'
+| summarize CVEs = make_set(CveId) by SoftwareVersion
+| extend CVECount = array_length(CVEs);
+DeviceTvmSoftwareEvidenceBeta
+| where SoftwareName =~ '<SOFTWARE_NAME>'
+| extend Paths = parse_json(DiskPaths)
+| mv-expand Path = Paths
+| extend FilePath = tostring(Path)
+| join kind=inner (
+    DeviceInfo | summarize arg_max(Timestamp, DeviceName) by DeviceId
+) on DeviceId
+| join kind=leftouter vulnVersions on SoftwareVersion
+| summarize 
+    Devices = make_set(DeviceName),
+    DeviceCount = dcount(DeviceName)
+    by FilePath, SoftwareVersion, CVECount
+| order by CVECount desc, DeviceCount desc
+```
+
+**Purpose:** Maps every vulnerable file path to its version and CVE count. Shows exactly which files on which devices are contributing to CVE exposure. Key for building targeted cleanup scripts.
+
+**Substitute:** Replace `<SOFTWARE_NAME>` with the target software name.
+
+**Common patterns revealed:**
+- Azure extensions: `C:\Packages\Plugins\<ExtensionName>\<OldVersion>\...\libcrypto-3-x64.dll` — old extension versions left behind after upgrades, each bundling their own OpenSSL/curl/zlib
+- OneDrive: `C:\Program Files\Microsoft OneDrive\<version>\` — every OneDrive update creates a new version folder with bundled libraries
+- Store apps: `C:\Program Files\WindowsApps\<AppName_Version>\` — managed by Microsoft Store, stale versions auto-cleaned eventually
+- Standalone installs: `C:\Program Files\<product>\` — requires manual update or reinstall
+
+---
+
+### Query 19: Stale Extension Folder Detection
+
+```kql
+// Drill-down: Find OLD Azure extension version folders still on disk
+// by comparing evidence paths against the latest installed version
+// Scope: All Azure extension evidence — safe to run fleet-wide (small result set)
+//
+// ⚠️ PITFALL: Version comparison uses string max() which is LEXICOGRAPHIC.
+//    "1.29.98" > "1.29.104" because '9' > '1' at position 5.
+//    Review results manually — a "stale" folder with a higher numeric version
+//    than "latest" means the comparison inverted. This is a known KQL limitation
+//    for dotted version strings with variable-width segments.
+DeviceTvmSoftwareEvidenceBeta
+| extend Paths = parse_json(DiskPaths)
+| mv-expand Path = Paths
+| extend FilePath = tostring(Path)
+| where FilePath has "packages" and FilePath has "plugins"
+| extend ExtensionName = extract(@"plugins\\([^\\]+)", 1, FilePath)
+| extend ExtensionVersion = extract(@"plugins\\[^\\]+\\([^\\]+)", 1, FilePath)
+| where isnotempty(ExtensionName) and isnotempty(ExtensionVersion)
+| join kind=inner (
+    DeviceInfo | summarize arg_max(Timestamp, DeviceName) by DeviceId
+) on DeviceId
+| summarize 
+    SoftwareVersions = make_set(SoftwareVersion),
+    FileCount = dcount(FilePath),
+    Devices = make_set(DeviceName)
+    by ExtensionName, ExtensionVersion
+| as hint.materialized=true AllExtVersions
+| join kind=inner (
+    AllExtVersions
+    | summarize LatestVersion = max(ExtensionVersion) by ExtensionName
+) on ExtensionName
+| where ExtensionVersion != LatestVersion
+| project ExtensionName, StaleVersion = ExtensionVersion, LatestVersion,
+    BundledSoftwareVersions = SoftwareVersions, FileCount, Devices
+| order by ExtensionName asc, StaleVersion asc
+```
+
+**Purpose:** Identifies old Azure extension version folders still present on disk after upgrades. These are the primary source of "phantom" CVEs from bundled libraries (OpenSSL, curl, zlib, etc.) that inflate vulnerability counts. Safe to run fleet-wide because it only returns stale folders (small result set).
+
+> **Known limitation:** `max(ExtensionVersion)` uses lexicographic string comparison, which breaks for version segments with different digit counts (e.g., `1.29.98` vs `1.29.104`). Always review results — if a "stale" version number looks higher than "latest," the comparison inverted. There is no built-in KQL function for semantic version comparison.
+
+> **Regex note:** `extract()` in KQL is case-sensitive. The evidence table stores paths in lowercase (`c:\packages\plugins\...`), so the regex uses lowercase `plugins`. The `has` operator used for filtering is case-insensitive.
+
+> **Remediation pattern:** For each stale extension version folder, the entire folder tree can be safely deleted:
+> ```powershell
+> Remove-Item -Recurse -Force "C:\Packages\Plugins\<ExtensionName>\<StaleVersion>"
+> ```
+> After cleanup, TVM will reflect the reduced vulnerability count within 4-24 hours.
+
+> **Common culprits:** Azure Monitor Agent (`AzureMonitorWindowsAgent`), Guest Configuration Agent (`ConfigurationforWindows`), Azure Security Center (`MicrosoftMonitoringAgent`), and other Azure Arc extensions that bundle OpenSSL, curl, or zlib.
+
+---
+
 ## Risk Assessment
 
 Compute an overall risk rating based on query results:
@@ -916,6 +1083,12 @@ When user specifies a device name, scope all DeviceTvm queries to that device:
 | `Context` in `DeviceTvmSecureConfigurationAssessment` is double-nested JSON | First `parse_json(Context)` returns an array of JSON strings; items need a second `parse_json()` to extract values | Use `parse_json(tostring(parse_json(Context)[0]))[N]` — e.g., `[0]` for AV mode code, `[2]` for signature date |
 | SCID numbers are OS-specific — same control has different IDs per platform | Querying Windows SCIDs on macOS/Linux returns `IsApplicable=0` | Use the SCID mapping: Windows `2010-2030`, macOS `5090-5095`, Linux `6090-6095`. Q9/Q11 normalize OS-specific SCIDs to unified control names |
 | Inactive devices have naturally stale AV signatures | Non-compliant `AVSignatures` on devices offline >7 days is expected, not a security gap | Always join `DeviceInfo` to separate active (seen <7d) from inactive devices; report inactive signature staleness as informational only |
+| `DeviceTvmSoftwareEvidenceBeta` is a Beta table | Table name and schema may change in future Defender releases | Use exact name `DeviceTvmSoftwareEvidenceBeta` — NOT `DeviceTvmSoftwareEvidences` or `DeviceTvmSoftwareEvidence`. If the table returns `SemanticError`, it may have been renamed or graduated to GA — check `FetchAdvancedHuntingTablesOverview` for the current name |
+| `DeviceTvmSoftwareEvidenceBeta` has no `DeviceName` column | Cannot display device names directly | Join with `DeviceInfo \| summarize arg_max(Timestamp, DeviceName) by DeviceId` — same pattern as `DeviceTvmCertificateInfo` |
+| `DiskPaths` and `RegistryPaths` are dynamic arrays | Need `parse_json()` + `mv-expand` to flatten into individual paths | Pattern: `\| extend Paths = parse_json(DiskPaths) \| mv-expand Path = Paths \| extend FilePath = tostring(Path)` |
+| Evidence queries can be expensive fleet-wide | Large environments have millions of file evidence rows | ALWAYS scope to a specific `SoftwareName`. Never run `DeviceTvmSoftwareEvidenceBeta` without a filter |
+| `max()` on version strings is lexicographic | `"1.29.98"` > `"1.29.104"` because `'9' > '1'` at the 5th character — inverts the comparison for multi-digit segments | Q19 results must be manually reviewed. KQL has no built-in semantic version comparison |
+| `extract()` regex is case-sensitive | Evidence table paths are lowercase (`c:\packages\plugins\...`), but regex patterns with uppercase (e.g., `Plugins`) won't match | Always use lowercase in `extract()` patterns for file paths. Use case-insensitive `has` for filtering |
 
 ---
 
