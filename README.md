@@ -1,6 +1,6 @@
 # 🔒 Security Investigation Automation System
 
-**Comprehensive, automated security investigations powered by Microsoft Sentinel, Defender XDR, Graph API, and threat intelligence — with 16 specialized Agent Skills**
+**Comprehensive, automated security investigations powered by Microsoft Sentinel, Defender XDR, Graph API, and threat intelligence — with 17 specialized Agent Skills**
 
 An investigation automation framework that combines **GitHub Copilot**, **VS Code Agent Skills**, and **Model Context Protocol (MCP) servers** to enable natural language security investigations. Ask questions like *"Investigate this user for the last 7 days"* or *"Is this IP malicious?"* and get comprehensive analysis with KQL queries, threat intelligence correlation, and professional reports.
 
@@ -32,7 +32,7 @@ copy .vscode\mcp.json.template .vscode\mcp.json
 
 **For detailed workflows and KQL queries:**
 → [.github/copilot-instructions.md](.github/copilot-instructions.md) (universal patterns, skill detection)
-→ [.github/skills/](.github/skills/) (16 specialized investigation workflows)
+→ [.github/skills/](.github/skills/) (17 specialized investigation workflows)
 → [queries/](queries/) (verified KQL query library)
 
 ---
@@ -47,7 +47,7 @@ copy .vscode\mcp.json.template .vscode\mcp.json
 │            (Skill detection, universal patterns, routing)          │
 ├────────────────────────────────────────────────────────────────────┤
 │                     .github/skills/*.md                            │
-│       (16 specialized workflows with KQL, risk assessment)         │
+│       (17 specialized workflows with KQL, risk assessment)         │
 ├────────────────────────────────────────────────────────────────────┤
 │                     MCP Servers (Platform)                         │
 │  ┌─────────────┐  ┌──────────────┐  ┌───────────────────────────┐  │
@@ -75,7 +75,7 @@ copy .vscode\mcp.json.template .vscode\mcp.json
 ```
 
 **Key Components:**
-- **16 Agent Skills** — Modular investigation workflows for incidents, users, devices, IoCs, authentication, scope drift (SPN/User/Device), MCP monitoring, exposure management, ingestion analysis, and more
+- **17 Agent Skills** — Modular investigation workflows for incidents, users, devices, IoCs, authentication, scope drift (SPN/User/Device), MCP monitoring, exposure management, ingestion analysis, detection authoring, and more
 - **7 MCP Server Integrations** — Sentinel Data Lake, Graph API, Defender XDR Triage, KQL Search, Microsoft Learn, Azure MCP Server, Sentinel Graph (private preview)
 - **3 Local MCP Apps** — Interactive heatmaps, geographic attack maps, incident commenting
 - **Python Utilities** — HTML report generation with IP enrichment (geolocation, VPN detection, abuse scores, Shodan port/service/CVE intelligence)
@@ -95,6 +95,7 @@ copy .vscode\mcp.json.template .vscode\mcp.json
 - **Scope Drift Detection** — 90-day behavioral baseline vs 7-day comparison for service principals, user accounts, and devices (3 specialized sub-skills)
 - **MCP Usage Monitoring** — Graph MCP, Sentinel MCP, Azure MCP server audit with behavioral baselines, anomaly detection, and composite scoring
 - **Ingestion & Cost Analysis** — Table-level volume breakdown, tier classification, anomaly detection, analytic rule inventory, license benefit analysis, migration candidates
+- **Custom Detection Authoring** — Create, deploy, update, and manage Defender XDR custom detection rules via Graph API with manifest-driven batch deployment
 - **Visualizations** — Interactive heatmaps and geographic attack maps
 
 ---
@@ -103,7 +104,7 @@ copy .vscode\mcp.json.template .vscode\mcp.json
 
 This system uses **[VS Code Agent Skills](https://code.visualstudio.com/docs/copilot/customization/agent-skills)** to provide modular, domain-specific investigation workflows. Skills are automatically detected based on keywords in your prompts.
 
-### Available Skills (16)
+### Available Skills (17)
 
 | Category | Skill | Description | Trigger Keywords |
 |----------|-------|-------------|------------------|
@@ -120,6 +121,7 @@ This system uses **[VS Code Agent Skills](https://code.visualstudio.com/docs/cop
 | 🛡️ Posture & Exposure | **[exposure-investigation](/.github/skills/exposure-investigation/SKILL.md)** | Vulnerability & Exposure Management reporting: CVE assessment with exploit/CVSS data, security configuration compliance, end-of-support software, ExposureGraph critical assets, attack paths, Defender health, certificate status | "vulnerability report", "exposure report", "CVE assessment", "security posture", "TVM" |
 | 📊 Visualization | **[geomap-visualization](/.github/skills/geomap-visualization/SKILL.md)** | Interactive world map visualization for Sentinel data: attack origin maps, geographic threat distribution, IP geolocation with enrichment drill-down | "geomap", "world map", "geographic", "attack map", "attack origins" |
 | 📊 Visualization | **[heatmap-visualization](/.github/skills/heatmap-visualization/SKILL.md)** | Interactive heatmap visualization for Sentinel data: attack patterns by time, activity grids, IP vs hour matrices, threat intel drill-down | "heatmap", "show heatmap", "visualize patterns", "activity grid" |
+| 🔧 Tooling & Monitoring | **[detection-authoring](/.github/skills/detection-authoring/SKILL.md)** | Create, deploy, update, and manage Defender XDR custom detection rules via Graph API. Query adaptation from Sentinel KQL, manifest-driven batch deployment via PowerShell, lifecycle management | "create custom detection", "deploy detection", "detection rule", "custom detection", "deploy rule", "batch deploy" |
 | 🔧 Tooling & Monitoring | **[kql-query-authoring](/.github/skills/kql-query-authoring/SKILL.md)** | KQL query creation using schema validation, community examples, Microsoft Learn | "write KQL", "create KQL query", "help with KQL", "query [table]" |
 | 🔧 Tooling & Monitoring | **[mcp-usage-monitoring](/.github/skills/mcp-usage-monitoring/SKILL.md)** | MCP server usage monitoring and audit: Graph MCP endpoint analysis, Sentinel MCP auth events, Azure MCP ARM operations, workspace query governance, MCP Usage Score with 5 health/risk dimensions | "MCP usage", "MCP server monitoring", "MCP activity", "MCP audit", "Graph MCP", "Sentinel MCP", "Azure MCP" |
 | 🔧 Tooling & Monitoring | **[sentinel-ingestion-report](/.github/skills/sentinel-ingestion-report/SKILL.md)** | Sentinel workspace ingestion & cost analysis: table-level volume breakdown, tier classification (Analytics/Basic/Data Lake), SecurityEvent/Syslog/CommonSecurityLog deep dives, ingestion anomaly detection, analytic rule inventory via REST API, custom detection inventory via Graph API, rule health via SentinelHealth, data lake tier migration candidates, license benefit analysis (DfS P2, M365 E5) | "ingestion report", "usage report", "data volume", "cost analysis", "table breakdown", "data lake tier", "ingestion anomaly", "cost optimization" |
@@ -150,6 +152,8 @@ You don't need to mention the skill name — keywords are detected automatically
 | "Analyze device process drift across the fleet" | scope-drift-detection/device |
 | "Show me MCP server usage for the last 30 days" | mcp-usage-monitoring |
 | "Generate a Sentinel ingestion report for the last 30 days" | sentinel-ingestion-report |
+| "Create custom detections for Event ID 4799" | detection-authoring |
+| "Deploy these detection rules to Defender XDR" | detection-authoring |
 
 ### Follow-ups and Chaining
 
@@ -226,10 +230,11 @@ security-investigator/
 ├── requirements.txt             # Python dependencies
 ├── .github/
 │   ├── copilot-instructions.md  # Skill detection, universal patterns, routing
-│   └── skills/                  # 16 Agent Skills (modular investigation workflows)
+│   └── skills/                  # 17 Agent Skills (modular investigation workflows)
 │       ├── authentication-tracing/
 │       ├── ca-policy-investigation/
 │       ├── computer-investigation/
+│       ├── detection-authoring/
 │       ├── geomap-visualization/
 │       ├── heatmap-visualization/
 │       ├── honeypot-investigation/
@@ -293,7 +298,7 @@ Each file uses a standardized metadata header for efficient `grep_search` discov
 | **Node.js 18+** | Required for KQL Search MCP (`npx`) and building local MCP Apps. [Download](https://nodejs.org/) or install via `winget install OpenJS.NodeJS.LTS` (Windows) / `brew install node` (macOS). |
 | **Microsoft Sentinel** | Log Analytics workspace with data. You'll need the workspace GUID and tenant ID. |
 | **Entra ID Permissions** | If you can query Sentinel in the Azure Portal, you likely have sufficient access. The **Graph MCP server** requires a [one-time tenant provisioning](https://learn.microsoft.com/en-us/graph/mcp-server/get-started?tabs=http%2Cvscode) by an admin. See [MCP Server Setup](#-mcp-server-setup) for detailed per-server requirements. |
-| **Microsoft.Graph PowerShell** | *Optional* — only needed for Custom Detection rule inventory in the `sentinel-ingestion-report` skill. `Install-Module Microsoft.Graph.Authentication -Scope CurrentUser`. Requires `CustomDetection.Read.All` scope. The skill degrades gracefully if not installed. |
+| **Microsoft.Graph PowerShell** | Required for `detection-authoring` skill (`CustomDetection.ReadWrite.All` — create/update/delete custom detection rules via Graph API). Also used by `sentinel-ingestion-report` skill for rule inventory (`CustomDetection.Read.All` — read-only, degrades gracefully if not installed). `Install-Module Microsoft.Graph.Authentication -Scope CurrentUser`. |
 | **GitHub PAT** | `public_repo` scope — [Create one here](https://github.com/settings/tokens/new). Used by KQL Search MCP. |
 
 ### 1. Install Dependencies

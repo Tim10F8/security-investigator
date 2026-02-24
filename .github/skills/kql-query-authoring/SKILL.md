@@ -134,6 +134,20 @@ Without these MCP servers, this skill cannot access schema information or offici
 - **Filters**: What specific conditions? (e.g., user, IP, threat type)
 - **Output**: Statistics, detailed records, time series, aggregations?
 - **Platform**: Sentinel or Defender XDR? (affects column names)
+- **Deployment target**: Custom detection rule? (see below)
+
+**Custom Detection Intent Detection:**
+
+If the user's request mentions any of these, the queries are intended for **custom detection deployment**:
+- "custom detection", "detection rule", "deploy as detection", "CD rule"
+- "author detections for", "create detections for"
+- "Defender XDR detection", "deploy to Defender"
+
+When CD intent is detected:
+1. **Read the detection-authoring skill** (`.github/skills/detection-authoring/SKILL.md`) — specifically the [Critical Rules](#) and [CD Metadata Contract](#) sections
+2. **Design queries with CD constraints in mind** — row-level output, mandatory columns (`TimeGenerated`, `DeviceName`, `ReportId`), no bare `summarize`
+3. **Include `cd-metadata` blocks** in the output file (see [Step 8](#step-8-format-and-deliver-output))
+4. **Still write queries in Sentinel format** (with `let` variables, 7d lookback) — the Sentinel version is the source of truth; adaptation to CD format happens at deployment time via the detection-authoring skill
 
 ### Step 2: Check Local Query Library
 
@@ -446,6 +460,70 @@ queries/email/email_threat_detection.md
 - Quick ad-hoc query for immediate use
 - User testing or learning KQL syntax
 - Follow-up query to previous investigation
+
+### Custom Detection Query Files (CD-Aware Output)
+
+When the user's intent is custom detection deployment (detected in Step 1), the output file format has additional requirements:
+
+**Per-query cd-metadata block:** Each query MUST include a `<!-- cd-metadata -->` HTML comment block with structured YAML fields. This block is consumed by the **detection-authoring** skill when deploying queries as custom detection rules.
+
+The full schema is defined in `.github/skills/detection-authoring/SKILL.md` under [CD Metadata Contract]. Place the block after `Severity` / `MITRE` / `Tuning Notes` and before the KQL code block:
+
+```markdown
+### Query N: [Title]
+
+**Purpose:** [What this detects]
+**Severity:** High
+**MITRE:** T1053.005
+
+**Tuning Notes:**
+- [Environment-specific guidance]
+
+<!-- cd-metadata
+cd_ready: true
+schedule: "1H"
+category: "Persistence"
+title: "Suspicious Scheduled Task on {{DeviceName}}"
+impactedAssets:
+  - type: device
+    identifier: DeviceName
+recommendedActions: "Investigate the task XML and decode any encoded payloads."
+adaptation_notes: "Remove let blocks, add mandatory columns"
+-->
+
+```kql
+// Query code (Sentinel format with let variables, 7d lookback)
+```
+```
+
+**cd-metadata field requirements:**
+
+| Field | Required | Values |
+|-------|----------|--------|
+| `cd_ready` | Always | `true` or `false` — explicitly declare CD suitability |
+| `schedule` | If cd_ready | `"0"` (NRT), `"1H"`, `"3H"`, `"12H"`, `"24H"` |
+| `category` | If cd_ready | API category value (e.g., `Persistence`, `LateralMovement`, `Discovery`) |
+| `title` | Optional | Dynamic title with `{{ColumnName}}` placeholders |
+| `impactedAssets` | If cd_ready | Array of `type` + `identifier` pairs |
+| `recommendedActions` | Optional | Triage guidance string |
+| `adaptation_notes` | Optional | What needs to change for CD format |
+
+**For queries NOT suitable for CD** (baseline queries, statistical aggregations):
+```markdown
+<!-- cd-metadata
+cd_ready: false
+adaptation_notes: "Statistical baseline — requires bare summarize, not CD-compatible"
+-->
+```
+
+**Summary table:** When creating a CD-aware query file, the Implementation Priority table at the end should include a `CD` column:
+
+```markdown
+| # | Query | Severity | MITRE | CD | Priority |
+|---|-------|----------|-------|----|----------|
+| 1 | ... | Medium | T1069.001 | ✅ 1H | 🟠 High |
+| 6 | Baseline | Info | N/A | ❌ | ⬜ Tuning |
+```
 
 **File location:**
 - **Directory:** `/queries` in workspace root
