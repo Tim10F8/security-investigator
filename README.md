@@ -294,6 +294,7 @@ Each file uses a standardized metadata header for efficient `grep_search` discov
 | **GitHub Copilot** | Active subscription — [Copilot Pro+](https://github.com/features/copilot), Business, or Enterprise. Agent mode must be enabled. |
 | **Python 3.8+** | For IP enrichment utility and report generation. [Download](https://www.python.org/downloads/) |
 | **Azure CLI** | Required for Azure MCP Server (underlying auth) and `sentinel-ingestion-report` skill (`az monitor log-analytics query` for all KQL queries, `az rest` for analytic rule inventory, `az monitor log-analytics workspace table list` for tier classification). [Install](https://aka.ms/installazurecli). Authenticate: `az login --tenant <tenant_id>`, then `az account set --subscription <subscription_id>`. Requires **Log Analytics Reader** (KQL queries + table list) and **Microsoft Sentinel Reader** (analytic rule inventory) on the workspace. |
+| **`log-analytics` CLI extension** | Required by the `sentinel-ingestion-report` skill for `az monitor log-analytics query` (all KQL queries in Phases 1-5). Install: `az extension add --name log-analytics`. Verify: `az extension list --query "[?name=='log-analytics']"`. |
 | **PowerShell 7.0+** | Required for `sentinel-ingestion-report` skill (parallel query execution via `ForEach-Object -Parallel`). [Install](https://learn.microsoft.com/en-us/powershell/scripting/install/installing-powershell). Verify: `$PSVersionTable.PSVersion`. |
 | **Node.js 18+** | Required for KQL Search MCP (`npx`) and building local MCP Apps. [Download](https://nodejs.org/) or install via `winget install OpenJS.NodeJS.LTS` (Windows) / `brew install node` (macOS). |
 | **Microsoft Sentinel** | Log Analytics workspace with data. You'll need the workspace GUID and tenant ID. |
@@ -313,6 +314,7 @@ pwsh --version     # Requires 7.0+ (needed for sentinel-ingestion-report skill)
 
 If Node.js is missing: [Download](https://nodejs.org/) or run `winget install OpenJS.NodeJS.LTS` (Windows) / `brew install node` (macOS).
 If Azure CLI is missing: [Install](https://aka.ms/installazurecli), then `az login --tenant <tenant_id>` and `az account set --subscription <subscription_id>`.
+If the `log-analytics` extension is missing: `az extension add --name log-analytics` (required for `sentinel-ingestion-report` skill).
 
 Set up Python environment:
 
