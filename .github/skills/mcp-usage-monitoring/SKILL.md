@@ -621,7 +621,7 @@ The Azure MCP Server runs as a local .NET process (stdio mode) and authenticates
 - To count actual API calls, correlate with AzureActivity (write ops) or LAQueryLogs (`monitor_workspace_log_query` calls)
 - The ~1hr token lifetime means at most ~24 sign-in event clusters per day of continuous use
 
-**AzureActivity visibility:** Only ARM **write/action/delete** operations appear in AzureActivity (Administrative category). Azure MCP Server read-only operations (list subscriptions, list resource groups, list clusters) do NOT appear. Claims.appid = `04b07795` when write operations do occur. AzureActivity has a ~2-4 hour ingestion lag.
+**AzureActivity visibility:** Only ARM **write/action/delete** operations appear in AzureActivity (Administrative category). Azure MCP Server read-only operations (list subscriptions, list resource groups, list clusters) do NOT appear. Claims.appid = `04b07795` when write operations do occur.
 
 **Note:** Azure MCP Server is **difficult to isolate** from manual Azure CLI usage because they share the same AppId and both produce empty `RequestClientApp`. The `\n| limit N` query text suffix is the best heuristic for LAQueryLogs. In SigninLogs, the shared AppId means Azure MCP authenticated as Azure CLI — there is no unique sign-in fingerprint. Present findings as "Azure MCP Server / Azure CLI (shared AppId `04b07795`)" in reports.
 
@@ -1938,7 +1938,7 @@ For full query definitions, deployment checklist, and companion analytics rule t
 - If the user also runs `az` CLI manually, sign-in events from both are indistinguishable
 - The `\n| limit N` query text suffix is the only reliable query-level differentiator but is heuristic
 - The credential chain may change with Azure MCP Server updates — monitor for AppId shifts
-- AzureActivity has ~2-4h ingestion lag; SigninLogs ~1-2h; LAQueryLogs/AADNonInteractiveUserSignInLogs ~5-15 min
+- AzureActivity ingestion lag is typically 3-20 min ([MS docs](https://learn.microsoft.com/azure/azure-monitor/logs/data-ingestion-time)); SigninLogs ~1-2h; LAQueryLogs/AADNonInteractiveUserSignInLogs ~5-15 min
 
 ### MicrosoftGraphActivityLogs Availability
 **Problem:** Graph activity logs are NOT enabled by default. If the table is empty or doesn't exist, Graph MCP analysis cannot proceed.  

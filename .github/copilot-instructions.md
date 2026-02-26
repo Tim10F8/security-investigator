@@ -550,7 +550,7 @@ Direct Azure Resource Manager and Azure Monitor integration for quick ad-hoc que
 **🔍 Azure MCP Server Detection (🔄 Updated Feb 2026):** Azure MCP Server now uses `DefaultAzureCredential` → **Azure CLI** credential, producing AppId `04b07795-8ddb-461a-bbee-02f9e1bf7b46`. The previously documented fingerprint (AppId `1950a258` + `csharpsdk,LogAnalyticsPSClient`) is **obsolete** — only 1 occurrence found in 30-day lookback.
 - **SigninLogs:** AppId `04b07795` — shared with manual Azure CLI, no unique sign-in fingerprint for Azure MCP
 - **LAQueryLogs:** AADClientId `04b07795`, `RequestClientApp` is **empty**. Best differentiator: Azure MCP `monitor_workspace_log_query` appends `\n| limit N` to query text
-- **AzureActivity:** Claims.appid `04b07795` (write operations only — reads not logged, ~2-4h ingestion lag)
+- **AzureActivity:** Claims.appid `04b07795` (write operations only — reads not logged)
 - **Token caching:** Sign-in events represent token acquisitions, NOT individual API calls. Count sign-in clusters as "access sessions".
 
 See `.github/skills/mcp-usage-monitoring/SKILL.md` Queries 25-27 for detection queries.

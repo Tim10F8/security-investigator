@@ -107,6 +107,8 @@ When converting a Sentinel query to custom detection format:
 5. ✅ Add a time filter as the first `where` clause — prefer `ingestion_time() > ago(1h)` over `TimeGenerated > ago(1h)` (see tip below). **NRT exception:** For NRT rules (`schedule: "0"`), omit the time filter entirely — events are processed as they stream in, and the platform pre-filters automatically.
 6. ✅ Remove `let` variables for NRT rules — **NRT rejects `let` entirely** (generic 400 error, undocumented). Inline all dynamic arrays directly in `where` clauses. Non-NRT rules tolerate `let`.
 7. ✅ Validate via Advanced Hunting dry-run before deployment
+8. ✅ For NRT rules: avoid `tostring()` on dynamic columns — use native string columns instead (e.g., `Properties` instead of `tostring(Properties_d)`). See [Pitfall 11](#pitfall-11-tostring-on-dynamic-columns-rejected-in-nrt-mode).
+9. ✅ For NRT rules: verify the table's ingestion lag justifies NRT. See [Pitfall 12](#pitfall-12-nrt-supported--nrt-practical--check-ingestion-lag).
 
 > **Performance tip (from MS Learn):** "Avoid filtering custom detections by using the `Timestamp` column. The data used for custom detections is prefiltered based on the detection frequency." Use `ingestion_time()` instead — it aligns with the platform's pre-filtering for better performance. For scheduled rules, match the time filter to the run frequency (`ingestion_time() > ago(1h)` for 1H rules). For NRT rules, no time filter is needed.
 
@@ -314,7 +316,7 @@ NRT (Continuous, `period: "0"`) rules have stricter requirements than scheduled 
 | **No `let` statements** | `let` variables are silently rejected — the API returns a generic `400 Bad Request` with no useful error message. **Always inline dynamic arrays/lists directly in `where` clauses.** This constraint is **not listed in the [official NRT docs](https://learn.microsoft.com/defender-xdr/custom-detection-rules#queries-you-can-run-continuously)** (which list only 4 constraints) but is consistently reproducible via Graph API (empirically confirmed Feb 2026). |
 | **No `externaldata`** | Cannot use the `externaldata` operator |
 | **No comments** | Query text must not contain any comment lines (`//`) |
-| **Supported operators only** | Limited to [supported KQL features](https://learn.microsoft.com/en-us/azure/azure-monitor/essentials/data-collection-transformations-structure#supported-kql-features) |
+| **Supported operators only** | Limited to [supported KQL features](https://learn.microsoft.com/en-us/azure/azure-monitor/essentials/data-collection-transformations-structure#supported-kql-features). **`tostring()` on dynamic columns is rejected** — use native string columns instead (e.g., `Properties` instead of `tostring(Properties_d)`). See [Pitfall 11](#pitfall-11-tostring-on-dynamic-columns-rejected-in-nrt-mode). |
 | **No time filter needed** | NRT processes events as they stream in. The platform pre-filters automatically. Adding a time filter (e.g., `TimeGenerated > ago(1h)`) is unnecessary but harmless. |
 
 ### NRT-Supported Tables
@@ -330,6 +332,10 @@ Not all tables support NRT frequency. Use NRT only with these tables:
 `ABAPAuditLog_CL`, `AuditLogs`, `AWSCloudTrail`, `AWSGuardDuty`, `AzureActivity`, `Cisco_Umbrella_dns_CL`, `Cisco_Umbrella_proxy_CL`, `CommonSecurityLog`, `GCPAuditLogs`, `MicrosoftGraphActivityLogs`, `OfficeActivity`, `Okta_CL`, `OktaV2_CL`, `ProofpointPOD`, `ProofPointTAPClicksPermitted_CL`, `ProofPointTAPMessagesDelivered_CL`, `SecurityAlert`, `SecurityEvent`, `SigninLogs`
 
 > **Important:** `SecurityEvent` and `SigninLogs` support NRT — our Event ID 4799/4702 queries can run as NRT if they meet the single-table/no-joins constraint.
+
+### Ingestion Lag Consideration — NRT Suitability
+
+A table being NRT-supported means the API **accepts** NRT rules — not that NRT is the right choice. If a table's ingestion lag exceeds the detection frequency benefit, NRT adds overhead with no detection speed improvement. See [Pitfall 12](#pitfall-12-nrt-supported--nrt-practical--check-ingestion-lag) for a per-table assessment. **Rule of thumb: if ingestion lag > 30 min, use 1H scheduled instead.**
 
 ### Custom Frequency (Sentinel Data Only)
 
@@ -712,3 +718,41 @@ This caused array fields like `responseActions` and `mitreTechniques` to seriali
 **Symptoms:** All rules in a batch return `400 Bad Request`, but some may be silently created (see [Pitfall 2](#pitfall-2-silent-rule-creation-on-error-responses-400-and-409)). Manual deployment of the same rule body (without the null fields) succeeds.
 
 **Fixed in:** [Deploy-CustomDetections.ps1](Deploy-CustomDetections.ps1) — array fields now use direct assignment, `organizationalScope` removed from body.
+
+### Pitfall 11: `tostring()` on Dynamic Columns Rejected in NRT Mode
+
+**Root cause (Feb 2026):** NRT rules (`schedule: "0"`) reject `tostring()` wrapping dynamic-typed columns. The API returns a generic `400 Bad Request` with no useful error message — identical to the `let` rejection in [Pitfall 10](#pitfall-10-powershell-empty-array-swallowing--organizationalscope). The same query deploys successfully as a scheduled rule (1H+).
+
+**Example — AzureActivity table:**
+
+```kql
+// ❌ FAILS in NRT mode — tostring() on dynamic column
+AzureActivity
+| where OperationNameValue =~ "MICROSOFT.SECURITY/PRICINGS/WRITE"
+| where tostring(Properties_d.pricings_pricingTier) == "Free"
+
+// ✅ WORKS — use the native string column instead
+AzureActivity
+| where OperationNameValue =~ "MICROSOFT.SECURITY/PRICINGS/WRITE"
+| where Properties has '"pricingTier":"Free"'
+```
+
+**Workarounds:**
+1. **Prefer native string columns** — many Sentinel tables have both a dynamic column (e.g., `Properties_d`) and a string column (e.g., `Properties`). Use the string column with `has` or `contains` for NRT.
+2. **Switch to 1H schedule** — if `tostring()` is required for precise extraction, use a scheduled rule where it works reliably.
+
+**Ingestion lag consideration:** Even when a table is NRT-supported, check whether ingestion lag makes NRT impractical — see [Ingestion Lag Consideration](#ingestion-lag-consideration--nrt-suitability).
+
+### Pitfall 12: NRT-Supported ≠ NRT-Practical — Check Ingestion Lag
+
+A table appearing in the [NRT-Supported Tables](#nrt-supported-tables) list means the API **accepts** NRT rules for that table — it does NOT mean NRT adds value. Tables with significant ingestion lag negate the benefit of continuous detection.
+
+| Table | Typical Ingestion Lag | NRT Practical? | Recommendation |
+|-------|-----------------------|----------------|----------------|
+| `DeviceEvents`, `DeviceProcessEvents` | < 5 min | ✅ Yes | NRT is effective |
+| `SigninLogs`, `AuditLogs` | 5-15 min | ⚠️ Marginal | 1H is usually sufficient |
+| `AzureActivity` | 3-20 min ([docs](https://learn.microsoft.com/azure/azure-monitor/logs/data-ingestion-time)) | ⚠️ Marginal | Evaluate per use case |
+| `SecurityEvent` | < 5 min | ✅ Yes | NRT is effective |
+| `OfficeActivity` | 15-60 min | ⚠️ Marginal | Evaluate per use case |
+
+**Rule of thumb:** If the table's ingestion lag exceeds 30 minutes, use a 1H scheduled rule instead of NRT. The detection latency is dominated by ingestion lag, not rule frequency.
