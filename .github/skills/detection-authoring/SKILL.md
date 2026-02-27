@@ -29,7 +29,7 @@ This skill deploys **custom detection rules** to Microsoft Defender XDR via the 
 6. **[Deployment Workflow](#deployment-workflow)** — Step-by-step process
 7. **[Batch Deployment](#batch-deployment)** — Manifest-driven multi-rule deployment
 8. **[Lifecycle Management](#lifecycle-management)** — CRUD operations
-9. **[Known Pitfalls](#known-pitfalls)** — Lessons learned
+9. **[Known Pitfalls](#known-pitfalls)** — Lessons learned (13 pitfalls documented)
 10. **[CD Metadata Contract](#cd-metadata-contract)** — Schema for query file ↔ detection skill coordination
 11. **[Query Library Reference](#query-library-reference)** — Deployable query catalog
 
@@ -80,6 +80,7 @@ Custom detection queries have strict requirements that differ from Sentinel anal
 | **Timestamp column must be projected as-is** | The query MUST project the timestamp column **exactly as it appears in the source table** — `TimeGenerated` for Sentinel/LA tables, `Timestamp` for XDR-native tables. Do not alias one to the other (e.g., `Timestamp = TimeGenerated` causes `400 Bad Request`). See [Pitfall 1](#pitfall-1-timestamp-vs-timegenerated). |
 | **Event-unique columns (per table type)** | Required columns that uniquely identify the event differ by table family. A bare `summarize count()` or `make_set()` loses these columns and fails. `summarize` with `arg_max` IS allowed — see [Pitfall 3](#pitfall-3-summarize--allowed-only-with-row-level-output). See table below for per-type requirements. |
 | **Impacted asset identifier column** | The query must project at least one column whose name matches a valid `impactedAssets` identifier (e.g., `AccountUpn`, `DeviceName`, `DeviceId`). See [Impacted Asset Types](#impacted-asset-types) and [Pitfall 9](#pitfall-9-impactedassets-identifier-must-be-a-predefined-api-value). Queries without `project` or `summarize` typically return these columns automatically. |
+| **`impactedAssets` must be non-empty** | The `impactedAssets` array must contain **at least 1 element**. An empty array (`[]`) is rejected with `400 BadRequest`: *"The field ImpactedAssets must be a string or array type with a minimum length of '1'."* Every detection must declare which entity it impacts. See [Pitfall 13](#pitfall-13-impactedassets-must-be-non-empty). |
 | **No `let` statements (NRT)** | **NRT rules (`schedule: "0"`) reject `let` entirely** — the API returns a generic `400 Bad Request`. This is **not documented by Microsoft** (empirically discovered Feb 2026) but consistently reproducible. Inline all dynamic arrays/lists directly in `where` clauses. Non-NRT rules (1H+) tolerate `let`. |
 | **Unique `displayName` AND `title`** | Both the rule `displayName` and the alert `title` must be unique across all custom detections. Duplicate `displayName` returns `409 Conflict`. Duplicate `title` returns `400 Bad Request`. |
 | **150 alerts per run** | Each rule generates a maximum of 150 alerts per execution. Tune the query to avoid alerting on normal day-to-day activity. |
@@ -257,6 +258,8 @@ Valid mailbox identifiers: `recipientEmailAddress`, `senderFromAddress`, `sender
     }
 }
 ```
+
+> **`impactedAssets`**: **Must contain at least 1 element** — an empty array causes `400 BadRequest`. Every detection must map to at least one impacted entity (device, user, or mailbox). See [Pitfall 13](#pitfall-13-impactedassets-must-be-non-empty).
 
 > **`recommendedActions`**: Can be `null` or a string. The portal sets it to `null` by default.
 
@@ -603,7 +606,9 @@ Custom detections automatically deduplicate alerts. If a detection fires twice o
 
 This aligns with the [MS Learn docs](https://learn.microsoft.com/en-us/defender-xdr/custom-detection-rules#required-columns-in-the-query-results) which list specific "strong identifier" columns for impacted assets. The portal wizard enforces this via a dropdown; the Graph API rejects non-matching values silently.
 
-Additionally, the query MUST project a column whose name matches the chosen identifier (case-insensitive). If you use `"identifier": "accountUpn"`, the query must project an `AccountUpn` column (alias if needed: `AccountUpn = UserId`).
+**Identifier values must use camelCase** as listed in the [Impacted Asset Types](#impacted-asset-types) section (e.g., `recipientEmailAddress`, not `RecipientEmailAddress`). The API treats identifier values as case-sensitive when matching to the predefined list.
+
+Additionally, the query MUST project a column whose name matches the chosen identifier. If you use `"identifier": "accountUpn"`, the query must project an `AccountUpn` column (alias if needed: `AccountUpn = UserId`). The column name match is case-insensitive — `AccountUpn` in the query matches `accountUpn` in the identifier.
 
 | Wrong | Correct |
 |-------|---------|
@@ -756,3 +761,25 @@ A table appearing in the [NRT-Supported Tables](#nrt-supported-tables) list mean
 | `OfficeActivity` | 15-60 min | ⚠️ Marginal | Evaluate per use case |
 
 **Rule of thumb:** If the table's ingestion lag exceeds 30 minutes, use a 1H scheduled rule instead of NRT. The detection latency is dominated by ingestion lag, not rule frequency.
+
+### Pitfall 13: `impactedAssets` Must Be Non-Empty
+
+**Root cause (Feb 2026):** The Graph API requires `impactedAssets` to contain **at least 1 element**. Sending an empty array (`"impactedAssets": []`) returns `400 BadRequest` with `InvalidInput` code and the message: *"The field ImpactedAssets must be a string or array type with a minimum length of '1'."*
+
+This error is particularly difficult to diagnose because:
+- The error message only appears in some response formats — when using `Invoke-MgGraphRequest` with raw JSON strings, the `"message"` field is often **empty** (`""`)
+- The actual error text only surfaced when using `ConvertTo-Json` on a PowerShell hashtable body
+- All other fields in the payload may be valid, making it seem like a server-side issue
+
+**Every custom detection must declare at least one impacted entity.** Choose the most relevant asset type for the detection:
+
+| Detection Focus | Asset Type | Example Identifier |
+|----------------|------------|--------------------|
+| Email-based threats | `impactedMailboxAsset` | `recipientEmailAddress`, `senderFromAddress` |
+| User activity | `impactedUserAsset` | `accountUpn`, `accountObjectId` |
+| Endpoint/device | `impactedDeviceAsset` | `deviceId`, `deviceName` |
+
+**Prevention:**
+- Always include at least one `impactedAssets` entry in manifests and API payloads
+- The companion script [Deploy-CustomDetections.ps1](Deploy-CustomDetections.ps1) validates this at manifest load time and rejects rules with empty `impactedAssets` before calling the API
+- Review the [Impacted Asset Types](#impacted-asset-types) section for the full list of valid identifiers per asset type

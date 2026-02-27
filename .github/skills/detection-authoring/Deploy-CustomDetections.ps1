@@ -65,6 +65,11 @@ function Get-ExistingRules {
 function Build-RuleBody {
     param([PSCustomObject]$Rule)
 
+    # Validate impactedAssets is non-empty (API rejects empty arrays with 400 BadRequest)
+    if (-not $Rule.impactedAssets -or $Rule.impactedAssets.Count -eq 0) {
+        throw "impactedAssets must contain at least 1 element. The API rejects empty arrays."
+    }
+
     $impactedAssets = @()
     foreach ($asset in $Rule.impactedAssets) {
         $odataType = switch ($asset.type) {
@@ -73,10 +78,11 @@ function Build-RuleBody {
             'mailbox' { "#microsoft.graph.security.impactedMailboxAsset" }
             default   { throw "Unknown asset type: $($asset.type)" }
         }
-        $impactedAssets += @{
-            "@odata.type" = $odataType
-            identifier    = $asset.identifier
+        $assetEntry = @{
+            identifier = $asset.identifier
         }
+        $assetEntry['@odata.type'] = $odataType
+        $impactedAssets += $assetEntry
     }
 
     # Alert title: use 'title' field if specified, fallback to displayName
